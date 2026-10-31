@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сервис - Обработка документов</title>
+
+    <!-- preconnect: ускоряет установку соединения с CDN шрифтов -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!--
+      [PROD] Tailwind CDN оставлен только для макета.
+      Для продакшена — сборка Tailwind CLI/PostCSS и подключение dist/app.css.
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!--
+      [PROD] Phosphor Icons грузит весь набор. Для продакшена — inline SVG-спрайт
+      только с используемыми иконками или subset.
+    -->
+    <script defer src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!--
+      SheetJS НЕ подключается здесь — грузится лениво при первом скачивании.
+      Версия 0.18.5 (публичный npm). Более новые версии (0.20.x) живут только
+      на cdn.sheetjs.com и на публичном jsdelivr/unpkg/cdnjs отсутствуют.
+      [PROD] Для продакшена: self-host или cdn.sheetjs.com + SRI.
+    -->
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .fade-in { animation: fadeIn 0.3s ease-in-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        input[type="checkbox"] { accent-color: #2563eb; width: 16px; height: 16px; cursor: pointer; }
+        .table-container { max-height: calc(100vh - 350px); overflow-y: auto; }
+        .demand-option[aria-selected="true"] { background: #eff6ff; color: #1d4ed8; }
+
+        .editable-name {
+            outline: none;
+            border-bottom: 1px dashed transparent;
+            transition: border-color 0.2s;
+        }
+        .editable-name:hover, .editable-name:focus {
+            border-bottom-color: #93c5fd;
+        }
+
+        #sidebar {
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .th-sort-btn {
+            appearance: none;
+            background: transparent;
+            border: none;
+            padding: 0;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-gray-800 relative">
+
+    <!-- ================= AUTH SCREEN ================= -->
+    <div id="auth-screen" class="fixed inset-0 bg-gray-100 flex items-center justify-center z-50 transition-opacity duration-300">
+        <form id="login-form" class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-gray-100 fade-in" novalidate>
+            <div class="flex justify-center mb-6">
+                <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl">С</div>
+            </div>
+            <h2 class="text-2xl font-bold mb-2 text-center">Вход в систему</h2>
+            <p class="text-gray-500 text-sm text-center mb-8">Введите ваши данные для доступа к сервису</p>
+
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label for="login-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" id="login-email" name="email" autocomplete="username"
+                           value="costarevap@yandex.ru"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                </div>
+                <div>
+                    <label for="login-password" class="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+                    <input type="password" id="login-password" name="password" autocomplete="current-password"
+                           value="password123"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                </div>
+            </div>
+
+            <div id="auth-error" class="hidden mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" aria-live="polite"></div>
+
+            <button id="login-submit" type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition-all shadow-sm">
+                Войти
+            </button>
+        </form>
+    </div>
+
+    <!-- ================= APP CONTAINER ================= -->
+    <div id="app-container" class="flex h-full hidden opacity-0 transition-opacity duration-300">
+        <div id="api-error-toast" class="hidden fixed top-20 right-6 z-[80] max-w-xl rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-lg" role="alert" aria-live="assertive"></div>
+
+        <!-- SIDEBAR -->
+        <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 z-20 relative">
+            <button type="button"
+                    class="h-16 flex items-center px-6 border-b border-gray-100 cursor-pointer w-full text-left overflow-hidden whitespace-nowrap"
+                    onclick="switchView('upload')">
+                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"></div>
+                <span id="logo-text" class="text-xl font-semibold tracking-tight ml-3 transition-opacity duration-300">Сервис</span>
+            </button>
+
+            <nav class="flex-1 py-4 flex flex-col gap-1 overflow-hidden" aria-label="Основная навигация">
+                <button type="button" onclick="switchView('upload')" id="nav-upload"
+                        class="nav-item flex items-center px-6 py-3 text-sm font-medium transition-colors text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                    <i class="ph ph-file-arrow-up text-xl flex-shrink-0" aria-hidden="true"></i>
+                    <span class="sidebar-text ml-3 transition-opacity duration-300">Загрузка документа</span>
+                </button>
+                <button type="button" onclick="switchView('history')" id="nav-history"
+                        class="nav-item flex items-center px-6 py-3 text-sm font-medium transition-colors text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                    <i class="ph ph-clock-counter-clockwise text-xl flex-shrink-0" aria-hidden="true"></i>
+                    <span class="sidebar-text ml-3 transition-opacity duration-300">История запросов</span>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-gray-100 flex justify-center">
+                <button type="button"
+                        onclick="toggleSidebar()"
+                        id="sidebar-toggle-btn"
+                        class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-800 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300"
+                        title="Свернуть/Развернуть меню"
+                        aria-label="Свернуть или развернуть боковое меню"
+                        aria-expanded="true"
+                        aria-controls="sidebar">
+                    <i id="sidebar-toggle-icon" class="ph ph-caret-left text-xl" aria-hidden="true"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <div class="flex-1 flex flex-col min-w-0">
+
+            <!-- HEADER -->
+            <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-8 z-30 relative">
+                <div class="flex items-center gap-6">
+                    <div class="relative">
+                        <button type="button" id="user-menu-trigger" onclick="toggleUserMenu(event)"
+                                class="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-lg transition-colors border border-transparent hover:border-gray-200"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="user-menu">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Polina&backgroundColor=ffdfbf" alt="" class="w-9 h-9 rounded-full bg-orange-100">
+                            <span class="text-sm">
+                                <!-- [API] Данные пользователя из GET /api/me -->
+                                <span class="font-medium text-gray-900 leading-tight block" id="user-name-display">Костарева Полина</span>
+                                <span class="text-gray-500 text-xs block" id="user-email-display">costarevap@yandex.ru</span>
+                            </span>
+                            <i class="ph ph-caret-down text-gray-400 text-sm ml-1" aria-hidden="true"></i>
+                        </button>
+
+                        <div id="user-menu" class="hidden absolute right-0 mt-2 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-50 fade-in" role="menu">
+                            <button type="button" onclick="handleLogout()" role="menuitem"
+                                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2">
+                                <i class="ph ph-sign-out text-lg" aria-hidden="true"></i> Выйти
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- MAIN CONTENT WRAPPER -->
+            <main class="flex-1 overflow-auto p-8 relative">
+
+                <!-- ================= VIEW 1: UPLOAD DOCUMENT ================= -->
+                <div id="view-upload" class="max-w-3xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+                        <h1 class="text-2xl font-bold mb-2">Загрузка документа</h1>
+                        <p class="text-gray-500 text-sm mb-6">Загрузите до 50 файлов с документами. После обработки запроса вы получите таблицу с результатами.</p>
+
+                        <div class="flex items-center gap-4 mb-6">
+                            <label for="min-debt-input" class="text-sm font-medium">Минимальная сумма долга</label>
+                            <div class="relative">
+                                <!-- [API] minDebt уходит в POST /api/process (см. startProcessing) -->
+                                <input type="text" id="min-debt-input" value="300 000" inputmode="numeric"
+                                       oninput="formatDebtInput(this)"
+                                       class="w-48 pl-4 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" aria-hidden="true">руб</span>
+                            </div>
+                        </div>
+
+                        <div id="upload-error" class="hidden bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm" role="alert"></div>
+
+                        <div id="drop-zone"
+                             role="button" tabindex="0"
+                             aria-label="Перенесите файлы или нажмите, чтобы выбрать в формате PDF или HTML"
+                             class="border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 p-10 text-center cursor-pointer hover:bg-gray-100 hover:border-blue-400 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <i class="ph ph-files text-4xl text-blue-500 mb-3" aria-hidden="true"></i>
+                            <p class="text-gray-700 font-medium mb-1">Перенесите сюда файлы</p>
+                            <p class="text-sm text-gray-500">или <span class="text-blue-600 underline">выберите файл</span> в формате .pdf и .html</p>
+                            <input type="file" id="file-input" class="hidden" multiple accept=".pdf,.html">
+                        </div>
+
+                        <div id="file-list-container" class="mt-8 hidden">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-sm font-semibold text-gray-900">Загруженные файлы (<span id="file-count">0</span>/50)</h3>
+                                <button type="button" onclick="clearFiles()" class="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1 transition-colors">
+                                    <i class="ph ph-trash" aria-hidden="true"></i> Очистить
+                                </button>
+                            </div>
+                            <div id="file-list" class="space-y-3 max-h-60 overflow-y-auto pr-2"></div>
+                        </div>
+
+                        <div class="mt-8 flex justify-end">
+                            <button type="button" id="btn-process" onclick="startProcessing()"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium text-sm transition-all shadow-sm opacity-50 cursor-not-allowed" disabled>
+                                Запустить обработку
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= VIEW 2: HISTORY ================= -->
+                <div id="view-history" class="hidden max-w-6xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                            <h1 class="text-2xl font-bold">История запросов</h1>
+
+                            <div class="relative w-full md:w-72">
+                                <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg" aria-hidden="true"></i>
+                                <label for="history-search" class="sr-only">Поиск по истории</label>
+                                <input type="text" id="history-search" placeholder="Поиск по названию, ФИО, VIN, авто..."
+                                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-gray-200 text-sm text-gray-500">
+                                        <th class="py-3 px-2 font-medium text-left">
+                                            <button type="button" onclick="sortHistory('name')" class="th-sort-btn flex items-center gap-1 hover:text-gray-800 transition-colors select-none">
+                                                Название <i id="sort-icon-name" class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                                            </button>
+                                        </th>
+                                        <th class="py-3 px-2 font-medium text-center">
+                                            <button type="button" onclick="sortHistory('date')" class="th-sort-btn flex items-center justify-center gap-1 hover:text-gray-800 transition-colors select-none mx-auto">
+                                                Дата и время <i id="sort-icon-date" class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                                            </button>
+                                        </th>
+                                        <th class="py-3 px-2 font-medium text-left">Пользователь</th>
+                                        <th class="py-3 px-2 font-medium text-right">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= VIEW 3: REPORT ================= -->
+                <div id="view-report" class="hidden max-w-7xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 min-h-[80vh] flex flex-col">
+
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center gap-4">
+                                <button type="button" onclick="switchView('history')" class="text-gray-400 hover:text-gray-800 transition-colors" aria-label="Назад к истории">
+                                    <i class="ph ph-arrow-left text-2xl" aria-hidden="true"></i>
+                                </button>
+                                <h1 class="text-2xl font-bold">Просмотр отчета</h1>
+                            </div>
+                            <div class="flex gap-3">
+                                <button type="button" onclick="switchView('upload')" class="border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                                    Загрузить постановление
+                                </button>
+                                <button type="button" id="btn-download-report" onclick="downloadSelected()"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                                    <i class="ph ph-download-simple" aria-hidden="true"></i> Скачать (<span id="selected-count">0</span>)
+                                </button>
+                            </div>
+                        </div>
+
+                        <h2 class="text-xl font-semibold mb-4" id="report-title">Запрос 1</h2>
+
+                        <div id="banner-loading" class="bg-blue-50 text-blue-800 p-4 rounded-lg mb-6 flex items-start gap-3 fade-in hidden" role="status" aria-live="polite">
+                            <i class="ph ph-info text-xl mt-0.5" aria-hidden="true"></i>
+                            <div>
+                                <div class="font-medium">Идет процесс обработки</div>
+                                <div class="text-sm mt-1 opacity-80">Пожалуйста, подождите: в данный момент выполняется обработка загруженных файлов и формирование отчета. После завершения обработки готовый отчет станет доступен для скачивания в формате Excel (.xlsx). Это может занять некоторое время.</div>
+                            </div>
+                        </div>
+
+                        <div id="banner-success" class="bg-green-50 text-green-800 p-4 rounded-lg mb-6 flex items-start gap-3 hidden fade-in" role="status" aria-live="polite">
+                            <i class="ph ph-check-circle text-xl mt-0.5" aria-hidden="true"></i>
+                            <div>
+                                <div class="font-medium">Документ обработан</div>
+                                <div id="success-message" class="text-sm mt-1 opacity-80">Готовый файл доступен для загрузки в формате XLSX.</div>
+                            </div>
+                        </div>
+                        <div id="banner-report-error" class="hidden bg-red-50 text-red-700 p-4 rounded-lg mb-6 flex items-start gap-3" role="alert" aria-live="assertive">
+                            <i class="ph ph-warning-circle text-xl mt-0.5" aria-hidden="true"></i>
+                            <div><div class="font-medium">Не удалось полностью обработать пакет</div><div id="report-error-message" class="text-sm mt-1"></div></div>
+                        </div>
+
+                        <!-- FILTERS -->
+                        <div id="report-filters" class="flex flex-wrap items-center gap-3 mb-6 transition-opacity duration-300">
+                            <button type="button" onclick="applyFilter('all')" data-filter="all" class="filter-btn bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors">Все</button>
+                            <button type="button" onclick="applyFilter('free')" data-filter="free" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors">Свободно</button>
+                            <button type="button" onclick="applyFilter('pledged')" data-filter="pledged" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors">В залоге</button>
+
+                            <div class="relative" id="demand-dropdown">
+                                <button type="button" id="demand-trigger" aria-haspopup="listbox" aria-expanded="false" onclick="toggleDemandMenu()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-2 min-w-[156px] justify-between">
+                                    <span id="demand-label">Любой спрос</span><i class="ph ph-caret-down text-gray-500" aria-hidden="true"></i>
+                                </button>
+                                <div id="demand-options" role="listbox" aria-label="Фильтр по спросу" class="hidden absolute z-30 top-full left-0 mt-1 min-w-full bg-white border border-gray-200 rounded-lg shadow-lg p-1">
+                                    <button type="button" role="option" aria-selected="true" data-demand="all" class="demand-option block w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-50 whitespace-nowrap">Любой спрос</button>
+                                    <button type="button" role="option" aria-selected="false" data-demand="Высокий" class="demand-option block w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-50 whitespace-nowrap">Высокий спрос</button>
+                                    <button type="button" role="option" aria-selected="false" data-demand="Средний" class="demand-option block w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-50 whitespace-nowrap">Средний спрос</button>
+                                    <button type="button" role="option" aria-selected="false" data-demand="Низкий" class="demand-option block w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-50 whitespace-nowrap">Низкий спрос</button>
+                                </div>
+                            </div>
+
+                            <button type="button" onclick="toggleSortPrice()" id="btn-sort-price" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1">
+                                Стоимость <i class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                            </button>
+                        </div>
+
+                        <!-- SKELETON LOADER -->
+                        <div id="table-skeleton" class="space-y-4 hidden" aria-hidden="true">
+                            <div class="flex gap-4"><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                        </div>
+
+                        <!-- DATA TABLE -->
+                        <!-- [API] GET /api/report/{queryId} должен возвращать поле `vin` для каждой строки. -->
+                        <div id="table-data" class="hidden overflow-x-auto fade-in table-container">
+                            <table class="w-full text-left border-collapse whitespace-nowrap">
+                                <thead class="sticky top-0 bg-white z-10 shadow-sm">
+                                    <tr class="border-b border-gray-200 text-sm text-gray-500">
+                                        <th class="py-3 px-2">
+                                            <input type="checkbox" id="select-all-checkbox" onchange="toggleAllCheckboxes(this)" aria-label="Выбрать все видимые">
+                                        </th>
+                                        <th class="py-3 px-2 font-medium">ФИО должника</th>
+                                        <th class="py-3 px-2 font-medium">ИНН</th>
+                                        <th class="py-3 px-2 font-medium">Сумма долга</th>
+                                        <th class="py-3 px-2 font-medium">VIN</th>
+                                        <th class="py-3 px-2 font-medium">Автомобиль</th>
+                                        <th class="py-3 px-2 font-medium text-center">Год</th>
+                                        <th class="py-3 px-2 font-medium">Госномер</th>
+                                        <th class="py-3 px-2 font-medium">Цена рынка</th>
+                                        <th class="py-3 px-2 font-medium">Спрос</th>
+                                        <th class="py-3 px-2 font-medium">Статус</th>
+                                        <th class="py-3 px-2 font-medium">Ссылка</th>
+                                        <th class="py-3 px-2 font-medium text-center">Документ</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm" id="report-tbody"></tbody>
+                            </table>
+                        </div>
+
+                        <div id="market-offers-modal" class="hidden fixed inset-0 z-50 bg-gray-900/40 items-center justify-center p-4" role="presentation" onclick="if(event.target===this)closeMarketOffers()">
+                            <section class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col" role="dialog" aria-modal="true" aria-labelledby="market-offers-title">
+                                <header class="flex items-center justify-between p-5 border-b border-gray-100">
+                                    <div><h2 id="market-offers-title" class="text-lg font-semibold text-gray-900">Объявления</h2><p id="market-offers-subtitle" class="text-sm text-gray-500 mt-1"></p></div>
+                                    <button type="button" onclick="closeMarketOffers()" class="text-gray-500 hover:text-gray-900 p-2 rounded-md hover:bg-gray-100" aria-label="Закрыть"><i class="ph ph-x text-xl"></i></button>
+                                </header>
+                                <div id="market-offers-list" class="overflow-y-auto p-4 space-y-2"></div>
+                            </section>
+                        </div>
+
+                    </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+    'use strict';
+    const $=id=>document.getElementById(id);
+    const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const safeUrl=v=>{try{const u=new URL(v);return ['http:','https:'].includes(u.protocol)?u.href:'#'}catch{return '#'}};
+    const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
+    let token=localStorage.getItem('token'), user=null, uploadedFiles=[], isProcessing=false;
+    let historyData=[], currentReportCars=[], currentReportId=null, reportTimer=null;
+    let currentFilter='all',currentDemandFilter='all',currentSort=null,currentMinPrice=300000,currentMinDemand=70;
+    let historySort={column:'rawDate',direction:'desc'};
+    const MAX_FILES=50,MAX_FILE_SIZE=25*1024*1024,ALLOWED_EXTENSIONS=['.pdf','.html','.htm'];
+    const fileInput=$('file-input'),dropZone=$('drop-zone'),fileList=$('file-list'),fileCountSpan=$('file-count'),fileListContainer=$('file-list-container'),uploadError=$('upload-error'),btnProcess=$('btn-process'),reportTbody=$('report-tbody'),historyTbody=$('history-tbody');
+    async function api(path,options={}){
+        const headers=new Headers(options.headers||{}); if(token)headers.set('Authorization','Bearer '+token);
+        const res=await fetch('/api'+path,{...options,headers});
+        if(!res.ok){let msg=`Ошибка API (${res.status})`;try{msg=(await res.json()).detail||msg}catch{};throw new Error(msg)}
+        return res.headers.get('content-type')?.includes('application/json')?res.json():res;
+    }
+    let errorToastTimer=null;
+    function showError(message){uploadError.textContent=message;uploadError.classList.remove('hidden');const toast=$('api-error-toast');if(toast){toast.textContent=message;toast.classList.remove('hidden');clearTimeout(errorToastTimer);errorToastTimer=setTimeout(()=>toast.classList.add('hidden'),8000)}}
+    function hideError(){uploadError.textContent='';uploadError.classList.add('hidden');$('api-error-toast')?.classList.add('hidden')}
+    function authVisible(visible){const auth=$('auth-screen'),app=$('app-container');if(visible){auth.classList.remove('hidden','opacity-0');app.classList.add('hidden','opacity-0')}else{auth.classList.add('opacity-0');setTimeout(()=>auth.classList.add('hidden'),250);app.classList.remove('hidden');setTimeout(()=>app.classList.remove('opacity-0'),30)}}
+    function applyProfile(u){user=u;$('user-name-display').textContent=u.name||u.email;$('user-email-display').textContent=u.email}
+    $('login-form').addEventListener('submit',async e=>{e.preventDefault();const error=$('auth-error'),button=$('login-submit');error.textContent='';error.classList.add('hidden');button.disabled=true;button.textContent='Входим…';try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('login-email').value.trim(),password:$('login-password').value})});let data;try{data=await response.json()}catch{data={}}if(!response.ok)throw Error(data.detail||`Не удалось войти (ошибка ${response.status})`);token=data.access_token;localStorage.setItem('token',token);applyProfile(data.user);authVisible(false);switchView('upload');await loadHistory()}catch(err){error.textContent=err.message||'Не удалось связаться с сервером';error.classList.remove('hidden')}finally{button.disabled=false;button.textContent='Войти'}});
+    async function handleLogout(){if(reportTimer)clearTimeout(reportTimer);localStorage.removeItem('token');token=null;user=null;authVisible(true);$('user-menu').classList.add('hidden')}
+    function toggleUserMenu(e){e?.stopPropagation();const menu=$('user-menu'),hidden=menu.classList.toggle('hidden');$('user-menu-trigger').setAttribute('aria-expanded',String(!hidden))}
+    document.addEventListener('click',e=>{const m=$('user-menu'),t=$('user-menu-trigger');if(m&&!m.classList.contains('hidden')&&!m.contains(e.target)&&!t.contains(e.target)){m.classList.add('hidden');t.setAttribute('aria-expanded','false')}});
+    function switchView(view){['upload','history','report'].forEach(v=>$('view-'+v).classList.toggle('hidden',v!==view));document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('bg-blue-600','text-white'));if(view==='upload')$('nav-upload').classList.add('bg-blue-600','text-white');if(view==='history'){$('nav-history').classList.add('bg-blue-600','text-white');loadHistory()}if(view==='report'){} }
+    let isSidebarCollapsed=false;
+    function applySidebarState(){const side=$('sidebar'),icon=$('sidebar-toggle-icon'),toggle=$('sidebar-toggle-btn');if(!side||!icon||!toggle)return;side.classList.toggle('w-64',!isSidebarCollapsed);side.classList.toggle('w-[72px]',isSidebarCollapsed);$('logo-text').classList.toggle('hidden',isSidebarCollapsed);document.querySelectorAll('.sidebar-text').forEach(x=>x.classList.toggle('hidden',isSidebarCollapsed));document.querySelectorAll('.nav-item').forEach(x=>{x.classList.toggle('px-6',!isSidebarCollapsed);x.classList.toggle('justify-center',isSidebarCollapsed);x.classList.toggle('px-0',isSidebarCollapsed)});icon.className='ph '+(isSidebarCollapsed?'ph-caret-right':'ph-caret-left')+' text-xl';toggle.setAttribute('aria-expanded',String(!isSidebarCollapsed))}
+    function toggleSidebar(){isSidebarCollapsed=!isSidebarCollapsed;applySidebarState();try{localStorage.setItem('sidebarCollapsed',String(isSidebarCollapsed))}catch{}}
+    function initSidebar(){try{isSidebarCollapsed=localStorage.getItem('sidebarCollapsed')==='true'}catch{}applySidebarState()}
+    function formatDebtInput(input){const n=input.value.replace(/\D/g,'');input.value=n?Number(n).toLocaleString('ru-RU'):''}
+    function showUploadErrors(errors){if(!errors.length){hideError();return}showError(errors.join(' '))}
+    dropZone.addEventListener('click',()=>fileInput.click());dropZone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fileInput.click()}});fileInput.addEventListener('change',e=>{handleFiles(e.target.files);fileInput.value=''});
+    let dragCounter=0;dropZone.addEventListener('dragenter',e=>{e.preventDefault();dragCounter++;dropZone.classList.add('bg-blue-50','border-blue-400')});dropZone.addEventListener('dragover',e=>e.preventDefault());dropZone.addEventListener('dragleave',e=>{e.preventDefault();if(--dragCounter<=0){dragCounter=0;dropZone.classList.remove('bg-blue-50','border-blue-400')}});dropZone.addEventListener('drop',e=>{e.preventDefault();dragCounter=0;dropZone.classList.remove('bg-blue-50','border-blue-400');handleFiles(e.dataTransfer.files)});
+    function handleFiles(files){const errors=[];for(const f of files){if(uploadedFiles.length>=MAX_FILES){errors.push('Достигнут лимит: максимум 50 файлов.');break}const ext='.'+f.name.split('.').pop().toLowerCase();if(!ALLOWED_EXTENSIONS.includes(ext)){errors.push(`«${f.name}»: разрешены PDF и HTML.`);continue}if(f.size>MAX_FILE_SIZE){errors.push(`«${f.name}»: файл больше 25 МБ.`);continue}if(!uploadedFiles.some(x=>x.name===f.name&&x.size===f.size))uploadedFiles.push(f)}showUploadErrors(errors);renderFiles()}
+    function formatFileSize(bytes){return bytes<1048576?`${Math.max(1,Math.round(bytes/1024))} КБ`:`${(bytes/1048576).toFixed(1)} МБ`}
+    function renderFiles(){fileList.innerHTML='';fileCountSpan.textContent=uploadedFiles.length;fileListContainer.classList.toggle('hidden',uploadedFiles.length===0);btnProcess.disabled=!uploadedFiles.length||isProcessing;btnProcess.textContent=isProcessing?'Обработка…':'Запустить обработку';btnProcess.classList.toggle('opacity-50',btnProcess.disabled);btnProcess.classList.toggle('cursor-not-allowed',btnProcess.disabled);uploadedFiles.forEach((f,i)=>{const isPdf=f.name.toLowerCase().endsWith('.pdf'),el=document.createElement('div');el.className='flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 group hover:border-blue-300 transition-all fade-in';el.innerHTML=`<div class="flex items-center gap-3 min-w-0"><div class="w-10 h-10 bg-blue-100 text-blue-600 rounded flex items-center justify-center flex-shrink-0"><i class="ph ph-file-${isPdf?'pdf':'html'} text-xl"></i></div><div class="min-w-0"><div class="text-sm font-medium text-gray-900 truncate max-w-xs" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div><div class="text-xs text-gray-500">${formatFileSize(f.size)}</div></div></div><button type="button" data-remove-index="${i}" class="text-gray-400 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100" aria-label="Удалить файл"><i class="ph ph-x-circle text-xl"></i></button>`;fileList.appendChild(el)})}
+    fileList.addEventListener('click',e=>{const b=e.target.closest('[data-remove-index]');if(b){uploadedFiles.splice(Number(b.dataset.removeIndex),1);renderFiles()}});function clearFiles(){uploadedFiles=[];showUploadErrors([]);renderFiles()}
+    async function startProcessing(){if(isProcessing||!uploadedFiles.length)return;hideError();isProcessing=true;renderFiles();const fd=new FormData();uploadedFiles.forEach(f=>fd.append('files',f));fd.append('min_price',($('min-debt-input').value||'300000').replace(/\D/g,'')||'300000');fd.append('min_demand','70');try{const d=await api('/process',{method:'POST',body:fd});currentReportId=d.report_id;$('report-title').textContent='Обработка запроса';switchView('report');currentReportCars=[];showReportLoadingState();pollReport(d.report_id)}catch(err){isProcessing=false;renderFiles();showError(err.message)}}
+    async function pollReport(id){try{const d=await api(`/reports/${id}`);if(d.status==='processing'){reportTimer=setTimeout(()=>pollReport(id),2000);return}reportTimer=null;if(d.status==='failed')throw Error(d.error_text||'Обработка завершилась ошибкой');currentReportId=id;$('report-title').textContent=d.name;currentMinPrice=Number.isFinite(Number(d.min_price))?Number(d.min_price):300000;currentMinDemand=Number.isFinite(Number(d.min_demand))?Number(d.min_demand):70;currentReportCars=(d.cars||[]).map(c=>normalizeCar(c));currentReportCars.forEach(c=>c.checked=isSelectable(c));finishReport();if(d.error_text)showReportError(d.error_text);isProcessing=false;clearFiles()}catch(err){reportTimer=null;showReportFailure(err.message);isProcessing=false;renderFiles()}}
+    function isSelectable(c){return c.doc_type==='ban'&&c.status!=='В залоге'}
+    function isPriorityEligible(c){return c.doc_type==='ban'&&c.price!=null&&c.demand!=null&&Number(c.price)>=currentMinPrice&&Number(c.demand)>=currentMinDemand}
+    function formatPlate(value){const raw=String(value||'').toUpperCase().replace(/\s+/g,'');return raw.replace(/^([А-ЯЁ]\d{3}[А-ЯЁ]{2})(\d{2,3})$/u,'$1 $2')}
+    function demandLabel(score){return score==null?null:score>=85?'Высокий':score>=70?'Средний':'Низкий'}
+    function normalizeCar(c){const n=c.debtor_name||'';return {...c,fullDebtor:n,shortDebtor:shortenName(n),debtAmount:c.debt_amount,model:[c.make,c.model].filter(Boolean).join(' ')||'—',plate:formatPlate(c.plate),demand:demandLabel(c.demand),price:c.price??null,status:c.status||'Не проверен',market_sources:c.market_sources||[],demand_sources:c.demand_sources||[],checked:isSelectable(c)}}
+    function shortenName(n){const p=String(n||'').trim().split(/\s+/);return p.length===3?`${p[0]} ${p[1][0]}. ${p[2][0]}.`:n||'—'}
+    function openReportById(id){openReport(id)}
+    async function openReport(id){if(reportTimer)clearTimeout(reportTimer);currentReportId=id;switchView('report');$('report-title').textContent='Загрузка отчёта…';$('banner-success').classList.add('hidden');$('banner-report-error').classList.add('hidden');$('banner-loading').classList.remove('hidden');$('table-data').classList.add('hidden');$('table-skeleton').classList.remove('hidden');try{const d=await api(`/reports/${id}`);if(d.status==='processing'){showReportLoadingState();pollReport(id);return}if(d.status==='failed')throw Error(d.error_text||'Ошибка обработки');$('report-title').textContent=d.name;currentMinPrice=Number.isFinite(Number(d.min_price))?Number(d.min_price):300000;currentMinDemand=Number.isFinite(Number(d.min_demand))?Number(d.min_demand):70;currentReportCars=(d.cars||[]).map(normalizeCar);currentReportCars.forEach(c=>c.checked=isSelectable(c));finishReport();if(d.error_text)showReportError(d.error_text)}catch(err){showReportFailure(err.message)}}
+    function showReportError(message){$('report-error-message').textContent=message;$('banner-report-error').classList.remove('hidden')}
+    function showReportFailure(message){$('banner-loading').classList.add('hidden');$('banner-success').classList.add('hidden');showReportError(message);$('table-skeleton').classList.add('hidden');$('table-data').classList.remove('hidden');$('report-tbody').innerHTML=`<tr><td colspan="13" class="text-center py-8 text-red-600">${escapeHtml(message)}</td></tr>`;$('report-filters').classList.add('opacity-50','pointer-events-none');updateSelectAllCheckboxState();updateSelectedCount()}
+    function showReportLoadingState(){$('banner-loading').classList.remove('hidden');$('banner-success').classList.add('hidden');$('banner-report-error').classList.add('hidden');$('table-skeleton').classList.remove('hidden');$('table-data').classList.add('hidden');$('btn-download-report').disabled=true;$('report-filters').classList.add('opacity-50','pointer-events-none')}
+    function finishReport(){const hasActive=currentReportCars.some(c=>c.doc_type==='ban'),priorityCount=currentReportCars.filter(isPriorityEligible).length;$('success-message').textContent=!hasActive?'В отчёте только снятые запреты: их можно просмотреть, но нельзя включить в выгрузку на взыскание.':`Активные постановления можно выбрать и выгрузить. Приоритетных авто по рыночным порогам: ${priorityCount}. Цена и спрос появятся после подключения источника; сейчас они не подменяются оценкой.`;$('banner-loading').classList.add('hidden');$('banner-success').classList.remove('hidden');$('banner-report-error').classList.add('hidden');$('table-skeleton').classList.add('hidden');$('table-data').classList.remove('hidden');$('report-filters').classList.remove('opacity-50','pointer-events-none');currentFilter='all';currentDemandFilter='all';currentSort=null;setDemandDropdown('all');updateFilterUI();renderReportTable()}
+    function renderReportTable(){
+        let rows=[...currentReportCars];
+        if(currentFilter==='free')rows=rows.filter(c=>c.status==='Свободно');
+        if(currentFilter==='pledged')rows=rows.filter(c=>c.status==='В залоге');
+        if(currentDemandFilter!=='all')rows=rows.filter(c=>c.demand===currentDemandFilter);
+        if(currentSort==='asc')rows.sort((a,b)=>(a.price||0)-(b.price||0));
+        if(currentSort==='desc')rows.sort((a,b)=>(b.price||0)-(a.price||0));
+        if(!rows.length){
+            reportTbody.innerHTML='<tr><td colspan="13" class="text-center py-8 text-gray-500">Нет данных, удовлетворяющих условиям фильтра</td></tr>';
+            updateSelectAllCheckboxState();updateSelectedCount();return;
+        }
+        reportTbody.innerHTML=rows.map(c=>{
+            const removal=c.doc_type==='removal',selectable=isSelectable(c);
+            const vinInfo=c.vin_source?`Проверка VIN: ${c.vin_source}${c.vin_checked_at?' · '+new Date(c.vin_checked_at).toLocaleString('ru-RU'):''}`:c.vin_error?`Ошибка проверки VIN: ${c.vin_error}`:'Источник проверки VIN не подключён';
+            const status=c.status==='Свободно'
+                ?`<span title="${escapeHtml(vinInfo)}" class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium">Свободно</span>`
+                :c.status==='В залоге'
+                    ?`<span title="${escapeHtml(vinInfo+' · автомобиль исключён из выгрузки')}" class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">В залоге</span>`
+                    :`<span title="${escapeHtml(vinInfo)}" class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">${escapeHtml(c.status)}</span>`;
+            const doc=removal
+                ?'<span title="Документ фиксирует снятие ранее установленного регистрационного запрета; это не признак залога" class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">Снят запрет</span>'
+                :`<span title="${escapeHtml(c.doc_number||'Постановление о запрете')}" class="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">ЗРД</span>`;
+            const href=safeUrl(c.link),debt=Number(c.debtAmount)>0?Number(c.debtAmount).toLocaleString('ru-RU'):'-',price=Number(c.price)>0?Number(c.price).toLocaleString('ru-RU'):'—';
+            const offers=c.market_sources||[],sourceCount=offers.length;
+            const offersButton=offers.length?`<button type="button" onclick="openMarketOffers(${Number(c.id)})" class="block mt-1 text-xs text-blue-600 hover:underline">Объявления (${offers.length})</button>`:'';
+            const marketDate=c.market_checked_at?new Date(c.market_checked_at).toLocaleString('ru-RU'):null;
+            const demandMeta=c.demand_sources.length?`Спрос: ${c.demand_sources.join(', ')}${marketDate?' · '+marketDate:''}`:'Источник не предоставил метрику спроса';
+            const demand=c.demand!=null?`<span title="${escapeHtml(demandMeta)}" class="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">${escapeHtml(c.demand)}</span>`:`<span class="text-gray-400" title="${escapeHtml(demandMeta)}">Нет данных</span>`;
+            const marketStatusLabels={not_configured:'источники не подключены',not_applicable:'не применимо',no_results:'нет предложений',found:'данные получены',partial:'частичный ответ источников',error:'ошибка источников'};
+            const marketProviders=(c.market_sources||[]).map(o=>o.source).filter((v,i,a)=>v&&a.indexOf(v)===i).join(', ');
+            const priceTitle=c.market_error?`Ошибка источника: ${c.market_error}`:`Статус: ${marketStatusLabels[c.market_status]||'нет данных'}${marketProviders?` · Объявления: ${marketProviders}`:''}${marketDate?` · Проверено: ${marketDate}`:''}`;
+            const priceWarning=c.market_error?`<div class="text-[11px] text-red-600" title="${escapeHtml(c.market_error)}">Есть ошибка API</div>`:'';
+            const confidence=Number(c.confidence);
+            const reviewBadge=Number.isFinite(confidence)&&confidence<.7?'<div class="mt-1"><span title="Проверьте распознанные поля вручную" class="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[11px]">Проверить данные</span></div>':'';
+            return `<tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors group ${removal?'bg-gray-50/60':''}">
+                <td class="py-3 px-2"><input type="checkbox" class="row-checkbox" data-id="${escapeHtml(c.id)}" ${c.checked?'checked':''} ${!selectable?'disabled':''} title="${selectable?'Доступно для выгрузки':'Снятые запреты нельзя выгружать'}" aria-label="Выбрать строку ${escapeHtml(c.fullDebtor)}"></td>
+                <td class="py-3 px-2 text-gray-900 font-medium relative group/tooltip"><span class="cursor-help border-b border-dashed border-gray-400">${escapeHtml(c.shortDebtor)}</span><div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/tooltip:block bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-50 shadow-lg">${escapeHtml(c.fullDebtor)}</div></td>
+                <td class="py-3 px-2 text-gray-600 font-mono text-xs">${escapeHtml(c.inn||'—')}</td>
+                <td class="py-3 px-2 text-red-600 font-medium">${debt} ₽</td>
+                <td class="py-3 px-2 text-gray-700 font-mono text-xs">${escapeHtml(c.vin||'—')}</td>
+                <td class="py-3 px-2 text-gray-900 font-medium">${escapeHtml(c.model)}</td>
+                <td class="py-3 px-2 text-gray-600 text-center">${escapeHtml(c.year||'—')}</td>
+                <td class="py-3 px-2 text-gray-600 uppercase font-mono text-xs">${escapeHtml(c.plate||'—')}</td>
+                <td class="py-3 px-2 text-gray-900" title="${escapeHtml(priceTitle)}">${Number(c.price)>0?`${price} ₽<div class="text-xs text-gray-400">по ${sourceCount} объявл.</div>`:'<span class="text-gray-400">Нет данных</span>'}${priceWarning}${offersButton}</td>
+                <td class="py-3 px-2">${demand}</td>
+                <td class="py-3 px-2">${status}${reviewBadge}</td>
+                <td class="py-3 px-2">${href!=='#'?`<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline" title="Объявление с ценой, ближайшей к средней">К объявлению</a>`:'<span class="text-gray-400" title="Появится после получения ценовых предложений с площадок">—</span>'}</td>
+                <td class="py-3 px-2 text-center">${doc}</td>
+            </tr>`;
+        }).join('');
+        updateSelectAllCheckboxState();updateSelectedCount();
+    }
+    function openMarketOffers(id){const car=currentReportCars.find(c=>Number(c.id)===Number(id));if(!car)return;const offers=car.market_sources||[],checked=car.market_checked_at?new Date(car.market_checked_at).toLocaleString('ru-RU'):'время запроса неизвестно';$('market-offers-title').textContent=`Объявления: ${car.model||'автомобиль'}`;$('market-offers-subtitle').textContent=`Средняя цена: ${Number(car.price).toLocaleString('ru-RU')} ₽ · ${offers.length} предложений · ${checked}`;$('market-offers-list').innerHTML=offers.length?offers.map((offer,index)=>{const href=safeUrl(offer.url),price=Number(offer.price).toLocaleString('ru-RU');return `<article class=\"border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-4\"><div class=\"min-w-0\"><div class=\"text-sm font-medium text-gray-900 truncate\">${escapeHtml(offer.title||offer.source||`Объявление ${index+1}`)}</div><div class=\"text-xs text-gray-500 mt-1\">${escapeHtml(offer.source||'Источник')}</div></div><div class=\"flex items-center gap-4 flex-shrink-0\"><strong class=\"text-sm text-gray-900\">${price} ₽</strong>${href!=='#'?`<a href=\"${escapeHtml(href)}\" target=\"_blank\" rel=\"noopener noreferrer\" class=\"text-sm text-blue-600 hover:underline\">Открыть</a>`:''}</div></article>`}).join(''):'<p class=\"text-sm text-gray-500 p-3\">Источники пока не вернули объявлений.</p>';$('market-offers-modal').classList.remove('hidden');$('market-offers-modal').classList.add('flex')}
+    function closeMarketOffers(){$('market-offers-modal').classList.add('hidden');$('market-offers-modal').classList.remove('flex')}
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMarketOffers()});
+    reportTbody.addEventListener('change',e=>{if(e.target.matches('.row-checkbox'))toggleRowCheckbox(e.target.dataset.id,e.target.checked)});function toggleRowCheckbox(id,checked){const c=currentReportCars.find(x=>String(x.id)===String(id));if(c)c.checked=checked;updateSelectAllCheckboxState();updateSelectedCount()}
+    function toggleAllCheckboxes(header){const checked=header.checked;document.querySelectorAll('.row-checkbox:not(:disabled)').forEach(box=>{box.checked=checked;const car=currentReportCars.find(c=>String(c.id)===String(box.dataset.id));if(car)car.checked=checked});updateSelectAllCheckboxState();updateSelectedCount()}
+    function updateSelectAllCheckboxState(){const h=$('select-all-checkbox'),boxes=[...document.querySelectorAll('.row-checkbox:not(:disabled)')];if(!h)return;const checked=boxes.filter(x=>x.checked).length;h.disabled=boxes.length===0;h.title=boxes.length?'Выбрать все доступные постановления':'Нет активных постановлений: снятые запреты нельзя выбрать';h.classList.toggle('opacity-40',h.disabled);h.classList.toggle('cursor-not-allowed',h.disabled);h.checked=boxes.length>0&&checked===boxes.length;h.indeterminate=checked>0&&checked<boxes.length}
+    function updateSelectedCount(){const n=currentReportCars.filter(c=>c.checked&&isSelectable(c)).length;$('selected-count').textContent=n;const b=$('btn-download-report');b.disabled=n===0;b.classList.toggle('opacity-50',n===0);b.classList.toggle('cursor-not-allowed',n===0)}
+    async function downloadSelected(){const ids=currentReportCars.filter(c=>c.checked&&isSelectable(c)).map(c=>c.id);if(!ids.length)return;try{const res=await api(`/reports/${currentReportId}/export?ids=${encodeURIComponent(ids.join(','))}`),blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`report_${currentReportId}.xlsx`;a.click();URL.revokeObjectURL(a.href)}catch(err){showError('Не удалось скачать отчёт: '+err.message)}}
+    function setDemandDropdown(value){const labels={all:'Любой спрос','Высокий':'Высокий спрос','Средний':'Средний спрос','Низкий':'Низкий спрос'};$('demand-label').textContent=labels[value]||labels.all;document.querySelectorAll('.demand-option').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.demand===value)));$('demand-options').classList.add('hidden');$('demand-trigger').setAttribute('aria-expanded','false')}
+    function toggleDemandMenu(){const menu=$('demand-options'),open=menu.classList.toggle('hidden')===false;$('demand-trigger').setAttribute('aria-expanded',String(open))}
+    $('demand-options').addEventListener('click',e=>{const option=e.target.closest('[data-demand]');if(!option)return;currentDemandFilter=option.dataset.demand;setDemandDropdown(currentDemandFilter);renderReportTable()});
+    document.addEventListener('click',e=>{if(!$('demand-dropdown').contains(e.target)){ $('demand-options').classList.add('hidden');$('demand-trigger').setAttribute('aria-expanded','false')}});
+    function applyFilter(t){currentFilter=t;if(t==='all'){currentDemandFilter='all';currentSort=null;setDemandDropdown('all')}updateFilterUI();renderReportTable()}function applyDemandFilter(v){currentDemandFilter=v;renderReportTable()}function toggleSortPrice(){currentSort=currentSort===null?'asc':currentSort==='asc'?'desc':null;updateFilterUI();renderReportTable()}
+    function updateFilterUI(){document.querySelectorAll('.filter-btn[data-filter]').forEach(b=>{const active=b.dataset.filter===currentFilter;b.className=active?'filter-btn bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors':'filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors'});const b=$('btn-sort-price'),i=b.querySelector('i');i.className='ph '+(currentSort==='asc'?'ph-sort-ascending':currentSort==='desc'?'ph-sort-descending':'ph-arrows-down-up');b.classList.toggle('bg-blue-100',!!currentSort);b.classList.toggle('text-blue-700',!!currentSort)}
+    async function loadHistory(){historyTbody.innerHTML='<tr><td colspan="4" class="text-center py-8 text-gray-500">Загружаем историю…</td></tr>';try{historyData=await api('/reports');historyData=historyData.map(x=>{const d=new Date(x.created_at);return {...x,rawDate:d.toISOString(),date:d.toLocaleDateString('ru-RU'),time:d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}),user:x.user||user?.name||'' ,searchString:x.search_text||''}});renderHistoryTable()}catch(err){historyTbody.innerHTML=`<tr><td colspan="4" class="text-center py-8 text-red-600">Не удалось загрузить историю. <button type="button" onclick="loadHistory()" class="underline font-medium">Повторить</button><span class="block text-sm text-gray-500 mt-1">${escapeHtml(err.message)}</span></td></tr>`}}
+    function sortHistory(col){if(historySort.column===col)historySort.direction=historySort.direction==='asc'?'desc':'asc';else{historySort.column=col;historySort.direction='asc'}renderHistoryTable()}
+    async function saveRequestName(id,name){const value=String(name||'').trim();if(!value)return;try{await api(`/reports/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:value})});const row=historyData.find(x=>x.id===id);if(row)row.name=value;renderHistoryTable()}catch(err){showError(err.message);loadHistory()}}
+    function renderHistoryTable(){const q=$('history-search').value.toLowerCase().trim();let rows=historyData.filter(x=>`${x.name} ${x.user} ${x.searchString}`.toLowerCase().includes(q));rows.sort((a,b)=>{const aa=historySort.column==='name'?a.name:a.rawDate,bb=historySort.column==='name'?b.name:b.rawDate;return (aa<bb?-1:aa>bb?1:0)*(historySort.direction==='asc'?1:-1)});$('sort-icon-name').className='ph '+(historySort.column==='name'?(historySort.direction==='asc'?'ph-sort-ascending':'ph-sort-descending'):'ph-arrows-down-up');$('sort-icon-date').className='ph '+(historySort.column!=='name'?(historySort.direction==='asc'?'ph-sort-ascending':'ph-sort-descending'):'ph-arrows-down-up');if(!rows.length){historyTbody.innerHTML='<tr><td colspan="4" class="text-center py-8 text-gray-500">Запросы не найдены</td></tr>';return}historyTbody.innerHTML=rows.map(r=>`<tr data-id="${r.id}" class="border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors group"><td class="py-3 px-2 text-sm font-medium text-gray-900 group-hover:text-blue-700"><div class="flex items-center gap-2"><span contenteditable="true" data-edit-id="${r.id}" class="editable-name focus:outline-none focus:bg-blue-50 px-1 rounded" title="Кликните, чтобы изменить название" role="textbox">${escapeHtml(r.name)}</span><i class="ph ph-pencil-simple text-gray-400 opacity-0 group-hover:opacity-100 text-xs"></i><span class="text-xs text-gray-400 font-normal ml-2">(${r.cars_count} авто)</span></div></td><td class="py-3 px-2 text-sm text-gray-500 text-center"><div class="flex flex-col items-center"><span>${escapeHtml(r.date)}</span><span class="text-xs text-gray-400">${escapeHtml(r.time)}</span></div></td><td class="py-3 px-2"><div class="flex items-center gap-2 pl-2"><img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(r.user)}&backgroundColor=ffdfbf" alt="" class="w-6 h-6 rounded-full bg-orange-100"><span class="text-sm text-gray-700">${escapeHtml(r.user)}</span></div></td><td class="py-3 px-2 text-right"><button type="button" data-action="view" class="w-8 h-8 bg-white border border-gray-200 text-gray-600 hover:bg-blue-100 hover:text-blue-600 rounded shadow-sm" title="Просмотр"><i class="ph ph-eye"></i></button></td></tr>`).join('')}
+    historyTbody.addEventListener('click',e=>{if(e.target.closest('.editable-name'))return;const tr=e.target.closest('tr[data-id]');if(tr)openReport(Number(tr.dataset.id))});historyTbody.addEventListener('focusout',e=>{const el=e.target.closest('.editable-name');if(el)saveRequestName(Number(el.dataset.editId),el.textContent)});historyTbody.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.closest('.editable-name')){e.preventDefault();e.target.blur()}});$('history-search').addEventListener('input',debounce(renderHistoryTable,250));
+    async function init(){initSidebar();if(!token){authVisible(true);return}try{const u=await api('/me');applyProfile(u);authVisible(false);switchView('upload');await loadHistory()}catch{localStorage.removeItem('token');token=null;authVisible(true)}}
+    init();
+    </script>
+</body>
+</html>

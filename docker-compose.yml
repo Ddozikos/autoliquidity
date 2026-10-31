@@ -1,0 +1,30 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: sqlite:////app/data/app.db
+      MAX_CONCURRENT_LLM_CALLS: ${MAX_CONCURRENT_LLM_CALLS:-5}
+      MAX_CONCURRENT_FILES: ${MAX_CONCURRENT_FILES:-5}
+      GIGACHAT_API_KEY: ${GIGACHAT_API_KEY:-}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-3-Ultra}
+      GIGACHAT_BASE_URL: ${GIGACHAT_BASE_URL:-https://api.giga.chat/v1}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_VERIFY_SSL_CERTS: ${GIGACHAT_VERIFY_SSL_CERTS:-false}
+      AVITO_PRICE_API_URL: ${AVITO_PRICE_API_URL:-}
+      AVITO_PRICE_API_KEY: ${AVITO_PRICE_API_KEY:-}
+      AUTORU_PRICE_API_URL: ${AUTORU_PRICE_API_URL:-}
+      AUTORU_PRICE_API_KEY: ${AUTORU_PRICE_API_KEY:-}
+      DROM_PRICE_API_URL: ${DROM_PRICE_API_URL:-}
+      DROM_PRICE_API_KEY: ${DROM_PRICE_API_KEY:-}
+      SBERAUTO_PRICE_API_URL: ${SBERAUTO_PRICE_API_URL:-}
+      SBERAUTO_PRICE_API_KEY: ${SBERAUTO_PRICE_API_KEY:-}
+      VIN_API_URL: ${VIN_API_URL:-}
+      VIN_API_KEY: ${VIN_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

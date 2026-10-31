@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сервис - Обработка документов</title>
+
+    <!-- preconnect: ускоряет установку соединения с CDN шрифтов -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!--
+      [PROD] Tailwind CDN оставлен только для макета.
+      Для продакшена — сборка Tailwind CLI/PostCSS и подключение dist/app.css.
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!--
+      [PROD] Phosphor Icons грузит весь набор. Для продакшена — inline SVG-спрайт
+      только с используемыми иконками или subset.
+    -->
+    <script defer src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!--
+      SheetJS НЕ подключается здесь — грузится лениво при первом скачивании.
+      Версия 0.18.5 (публичный npm). Более новые версии (0.20.x) живут только
+      на cdn.sheetjs.com и на публичном jsdelivr/unpkg/cdnjs отсутствуют.
+      [PROD] Для продакшена: self-host или cdn.sheetjs.com + SRI.
+    -->
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .fade-in { animation: fadeIn 0.3s ease-in-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        input[type="checkbox"] { accent-color: #2563eb; width: 16px; height: 16px; cursor: pointer; }
+        .table-container { max-height: calc(100vh - 350px); overflow-y: auto; }
+
+        .editable-name {
+            outline: none;
+            border-bottom: 1px dashed transparent;
+            transition: border-color 0.2s;
+        }
+        .editable-name:hover, .editable-name:focus {
+            border-bottom-color: #93c5fd;
+        }
+
+        #sidebar {
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .th-sort-btn {
+            appearance: none;
+            background: transparent;
+            border: none;
+            padding: 0;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-gray-800 relative">
+
+    <!-- ================= AUTH SCREEN ================= -->
+    <div id="auth-screen" class="fixed inset-0 bg-gray-100 flex items-center justify-center z-50 transition-opacity duration-300">
+        <form id="login-form" class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-gray-100 fade-in" novalidate>
+            <div class="flex justify-center mb-6">
+                <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl">С</div>
+            </div>
+            <h2 class="text-2xl font-bold mb-2 text-center">Вход в систему</h2>
+            <p class="text-gray-500 text-sm text-center mb-8">Введите ваши данные для доступа к сервису</p>
+
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label for="login-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" id="login-email" name="email" autocomplete="username"
+                           value="costarevap@yandex.ru"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                </div>
+                <div>
+                    <label for="login-password" class="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+                    <input type="password" id="login-password" name="password" autocomplete="current-password"
+                           value="password123"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                </div>
+            </div>
+
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition-all shadow-sm">
+                Войти
+            </button>
+        </form>
+    </div>
+
+    <!-- ================= APP CONTAINER ================= -->
+    <div id="app-container" class="flex h-full hidden opacity-0 transition-opacity duration-300">
+
+        <!-- SIDEBAR -->
+        <aside id="sidebar" class="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 z-20 relative">
+            <button type="button"
+                    class="h-16 flex items-center px-6 border-b border-gray-100 cursor-pointer w-full text-left overflow-hidden whitespace-nowrap"
+                    onclick="switchView('upload')">
+                <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"></div>
+                <span id="logo-text" class="text-xl font-semibold tracking-tight ml-3 transition-opacity duration-300">Сервис</span>
+            </button>
+
+            <nav class="flex-1 py-4 flex flex-col gap-1 overflow-hidden" aria-label="Основная навигация">
+                <button type="button" onclick="switchView('upload')" id="nav-upload"
+                        class="nav-item flex items-center px-6 py-3 text-sm font-medium transition-colors text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                    <i class="ph ph-file-arrow-up text-xl flex-shrink-0" aria-hidden="true"></i>
+                    <span class="sidebar-text ml-3 transition-opacity duration-300">Загрузка документа</span>
+                </button>
+                <button type="button" onclick="switchView('history')" id="nav-history"
+                        class="nav-item flex items-center px-6 py-3 text-sm font-medium transition-colors text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                    <i class="ph ph-clock-counter-clockwise text-xl flex-shrink-0" aria-hidden="true"></i>
+                    <span class="sidebar-text ml-3 transition-opacity duration-300">История запросов</span>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-gray-100 flex justify-center">
+                <button type="button"
+                        onclick="toggleSidebar()"
+                        id="sidebar-toggle-btn"
+                        class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-800 hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300"
+                        title="Свернуть/Развернуть меню"
+                        aria-label="Свернуть или развернуть боковое меню"
+                        aria-expanded="true"
+                        aria-controls="sidebar">
+                    <i id="sidebar-toggle-icon" class="ph ph-caret-left text-xl" aria-hidden="true"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <div class="flex-1 flex flex-col min-w-0">
+
+            <!-- HEADER -->
+            <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-8 z-30 relative">
+                <div class="flex items-center gap-6">
+                    <div class="relative">
+                        <button type="button" id="user-menu-trigger" onclick="toggleUserMenu(event)"
+                                class="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1.5 rounded-lg transition-colors border border-transparent hover:border-gray-200"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="user-menu">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Polina&backgroundColor=ffdfbf" alt="" class="w-9 h-9 rounded-full bg-orange-100">
+                            <span class="text-sm">
+                                <!-- [API] Данные пользователя из GET /api/me -->
+                                <span class="font-medium text-gray-900 leading-tight block" id="user-name-display">Костарева Полина</span>
+                                <span class="text-gray-500 text-xs block" id="user-email-display">costarevap@yandex.ru</span>
+                            </span>
+                            <i class="ph ph-caret-down text-gray-400 text-sm ml-1" aria-hidden="true"></i>
+                        </button>
+
+                        <div id="user-menu" class="hidden absolute right-0 mt-2 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 z-50 fade-in" role="menu">
+                            <button type="button" onclick="handleLogout()" role="menuitem"
+                                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2">
+                                <i class="ph ph-sign-out text-lg" aria-hidden="true"></i> Выйти
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- MAIN CONTENT WRAPPER -->
+            <main class="flex-1 overflow-auto p-8 relative">
+
+                <!-- ================= VIEW 1: UPLOAD DOCUMENT ================= -->
+                <div id="view-upload" class="max-w-3xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+                        <h1 class="text-2xl font-bold mb-2">Загрузка документа</h1>
+                        <p class="text-gray-500 text-sm mb-6">Загрузите до 50 файлов с документами. После обработки запроса вы получите таблицу с результатами.</p>
+
+                        <div class="flex items-center gap-4 mb-6">
+                            <label for="min-debt-input" class="text-sm font-medium">Минимальная сумма долга</label>
+                            <div class="relative">
+                                <!-- [API] minDebt уходит в POST /api/process (см. startProcessing) -->
+                                <input type="text" id="min-debt-input" value="300 000" inputmode="numeric"
+                                       oninput="formatDebtInput(this)"
+                                       class="w-48 pl-4 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400">
+                                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" aria-hidden="true">руб</span>
+                            </div>
+                        </div>
+
+                        <div id="upload-error" class="hidden bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm" role="alert"></div>
+
+                        <div id="drop-zone"
+                             role="button" tabindex="0"
+                             aria-label="Перенесите файлы или нажмите, чтобы выбрать в формате PDF или HTML"
+                             class="border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 p-10 text-center cursor-pointer hover:bg-gray-100 hover:border-blue-400 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <i class="ph ph-files text-4xl text-blue-500 mb-3" aria-hidden="true"></i>
+                            <p class="text-gray-700 font-medium mb-1">Перенесите сюда файлы</p>
+                            <p class="text-sm text-gray-500">или <span class="text-blue-600 underline">выберите файл</span> в формате .pdf и .html</p>
+                            <input type="file" id="file-input" class="hidden" multiple accept=".pdf,.html">
+                        </div>
+
+                        <div id="file-list-container" class="mt-8 hidden">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-sm font-semibold text-gray-900">Загруженные файлы (<span id="file-count">0</span>/50)</h3>
+                                <button type="button" onclick="clearFiles()" class="text-sm text-gray-500 hover:text-red-500 flex items-center gap-1 transition-colors">
+                                    <i class="ph ph-trash" aria-hidden="true"></i> Очистить
+                                </button>
+                            </div>
+                            <div id="file-list" class="space-y-3 max-h-60 overflow-y-auto pr-2"></div>
+                        </div>
+
+                        <div class="mt-8 flex justify-end">
+                            <button type="button" id="btn-process" onclick="startProcessing()"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium text-sm transition-all shadow-sm opacity-50 cursor-not-allowed" disabled>
+                                Запустить обработку
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= VIEW 2: HISTORY ================= -->
+                <div id="view-history" class="hidden max-w-6xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                            <h1 class="text-2xl font-bold">История запросов</h1>
+
+                            <div class="relative w-full md:w-72">
+                                <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg" aria-hidden="true"></i>
+                                <label for="history-search" class="sr-only">Поиск по истории</label>
+                                <input type="text" id="history-search" placeholder="Поиск по названию, ФИО, VIN, авто..."
+                                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all">
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-gray-200 text-sm text-gray-500">
+                                        <th class="py-3 px-2 font-medium text-left">
+                                            <button type="button" onclick="sortHistory('name')" class="th-sort-btn flex items-center gap-1 hover:text-gray-800 transition-colors select-none">
+                                                Название <i id="sort-icon-name" class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                                            </button>
+                                        </th>
+                                        <th class="py-3 px-2 font-medium text-center">
+                                            <button type="button" onclick="sortHistory('date')" class="th-sort-btn flex items-center justify-center gap-1 hover:text-gray-800 transition-colors select-none mx-auto">
+                                                Дата и время <i id="sort-icon-date" class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                                            </button>
+                                        </th>
+                                        <th class="py-3 px-2 font-medium text-left">Пользователь</th>
+                                        <th class="py-3 px-2 font-medium text-right">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= VIEW 3: REPORT ================= -->
+                <div id="view-report" class="hidden max-w-7xl mx-auto fade-in">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 min-h-[80vh] flex flex-col">
+
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center gap-4">
+                                <button type="button" onclick="switchView('history')" class="text-gray-400 hover:text-gray-800 transition-colors" aria-label="Назад к истории">
+                                    <i class="ph ph-arrow-left text-2xl" aria-hidden="true"></i>
+                                </button>
+                                <h1 class="text-2xl font-bold">Просмотр отчета</h1>
+                            </div>
+                            <div class="flex gap-3">
+                                <button type="button" onclick="switchView('upload')" class="border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                                    Загрузить постановление
+                                </button>
+                                <button type="button" id="btn-download-report" onclick="downloadSelected()"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                                    <i class="ph ph-download-simple" aria-hidden="true"></i> Скачать (<span id="selected-count">0</span>)
+                                </button>
+                            </div>
+                        </div>
+
+                        <h2 class="text-xl font-semibold mb-4" id="report-title">Запрос 1</h2>
+
+                        <div id="banner-loading" class="bg-blue-50 text-blue-800 p-4 rounded-lg mb-6 flex items-start gap-3 fade-in hidden" role="status" aria-live="polite">
+                            <i class="ph ph-info text-xl mt-0.5" aria-hidden="true"></i>
+                            <div>
+                                <div class="font-medium">Идет процесс обработки</div>
+                                <div class="text-sm mt-1 opacity-80">Пожалуйста, подождите: в данный момент выполняется обработка загруженных файлов и формирование отчета. После завершения обработки готовый отчет станет доступен для скачивания в формате Excel (.xlsx). Это может занять некоторое время.</div>
+                            </div>
+                        </div>
+
+                        <div id="banner-success" class="bg-green-50 text-green-800 p-4 rounded-lg mb-6 flex items-start gap-3 hidden fade-in" role="status" aria-live="polite">
+                            <i class="ph ph-check-circle text-xl mt-0.5" aria-hidden="true"></i>
+                            <div>
+                                <div class="font-medium">Документ обработан</div>
+                                <div class="text-sm mt-1 opacity-80">Готовый файл доступен для загрузки в формате XLSX.</div>
+                            </div>
+                        </div>
+
+                        <!-- FILTERS -->
+                        <div id="report-filters" class="flex flex-wrap items-center gap-3 mb-6 transition-opacity duration-300">
+                            <button type="button" onclick="applyFilter('all')" data-filter="all" class="filter-btn bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors">Все</button>
+                            <button type="button" onclick="applyFilter('free')" data-filter="free" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors">Свободно</button>
+                            <button type="button" onclick="applyFilter('pledged')" data-filter="pledged" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors">В залоге</button>
+
+                            <label for="demand-select" class="sr-only">Спрос</label>
+                            <select id="demand-select" onchange="applyDemandFilter(this.value)" class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-1.5 rounded-md text-sm font-medium outline-none cursor-pointer border-none transition-colors">
+                                <option value="all">Любой спрос</option>
+                                <option value="Высокий">Высокий спрос</option>
+                                <option value="Средний">Средний спрос</option>
+                                <option value="Низкий">Низкий спрос</option>
+                            </select>
+
+                            <button type="button" onclick="toggleSortPrice()" id="btn-sort-price" class="filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1">
+                                Стоимость <i class="ph ph-arrows-down-up" aria-hidden="true"></i>
+                            </button>
+                        </div>
+
+                        <!-- SKELETON LOADER -->
+                        <div id="table-skeleton" class="space-y-4 hidden" aria-hidden="true">
+                            <div class="flex gap-4"><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div><div class="h-4 bg-gray-200 rounded w-1/4 animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                            <div class="flex gap-4"><div class="h-8 bg-gray-100 rounded w-full animate-pulse"></div></div>
+                        </div>
+
+                        <!-- DATA TABLE -->
+                        <!-- [API] GET /api/report/{queryId} должен возвращать поле `vin` для каждой строки. -->
+                        <div id="table-data" class="hidden overflow-x-auto fade-in table-container">
+                            <table class="w-full text-left border-collapse whitespace-nowrap">
+                                <thead class="sticky top-0 bg-white z-10 shadow-sm">
+                                    <tr class="border-b border-gray-200 text-sm text-gray-500">
+                                        <th class="py-3 px-2">
+                                            <input type="checkbox" id="select-all-checkbox" onchange="toggleAllCheckboxes(this)" aria-label="Выбрать все видимые">
+                                        </th>
+                                        <th class="py-3 px-2 font-medium">ФИО должника</th>
+                                        <th class="py-3 px-2 font-medium">ИНН</th>
+                                        <th class="py-3 px-2 font-medium">Сумма долга</th>
+                                        <th class="py-3 px-2 font-medium">VIN</th>
+                                        <th class="py-3 px-2 font-medium">Автомобиль</th>
+                                        <th class="py-3 px-2 font-medium text-center">Год</th>
+                                        <th class="py-3 px-2 font-medium">Госномер</th>
+                                        <th class="py-3 px-2 font-medium">Цена рынка</th>
+                                        <th class="py-3 px-2 font-medium">Статус</th>
+                                        <th class="py-3 px-2 font-medium">Спрос</th>
+                                        <th class="py-3 px-2 font-medium">Ссылка</th>
+                                        <th class="py-3 px-2 font-medium text-center">Документ</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm" id="report-tbody"></tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        // ==========================================
+        // 0. УТИЛИТЫ
+        // ==========================================
+
+        const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+
+        /**
+         * Безопасный URL.
+         * Важно: НЕ используем new URL(url, location.origin) как единственный вариант,
+         * потому что в file:// или sandbox-iframe location.origin === 'null',
+         * а new URL(..., 'null') бросает TypeError — и ВСЕ ссылки превращаются в '#'.
+         * Абсолютные http(s)-URL проверяем напрямую, относительные — только при валидном origin.
+         */
+        function safeUrl(url) {
+            if (!url || typeof url !== 'string') return '#';
+            try {
+                const u = new URL(url);
+                if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+                return '#';
+            } catch (_) {
+                // не абсолютный — попробуем как относительный от origin (если он валиден)
+                try {
+                    const origin = location.origin;
+                    if (origin && origin !== 'null' && origin !== 'undefined') {
+                        const u = new URL(url, origin);
+                        if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+                    }
+                } catch (_) { /* ignore */ }
+                return '#';
+            }
+        }
+
+        function debounce(fn, ms) {
+            let t;
+            return function (...args) {
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(this, args), ms);
+            };
+        }
+
+        // ==========================================
+        // 0.1. САЙДБАР
+        // ==========================================
+        let isSidebarCollapsed = false;
+
+        function applySidebarState() {
+            const sidebar = document.getElementById('sidebar');
+            const icon = document.getElementById('sidebar-toggle-icon');
+            const toggleBtn = document.getElementById('sidebar-toggle-btn');
+            const logoText = document.getElementById('logo-text');
+            const sidebarTexts = document.querySelectorAll('.sidebar-text');
+            const navItems = document.querySelectorAll('.nav-item');
+
+            if (isSidebarCollapsed) {
+                sidebar.classList.remove('w-64');
+                sidebar.classList.add('w-[72px]');
+                logoText.classList.add('hidden');
+                sidebarTexts.forEach(t => t.classList.add('hidden'));
+                navItems.forEach(item => {
+                    item.classList.remove('px-6');
+                    item.classList.add('justify-center', 'px-0');
+                });
+                icon.className = 'ph ph-caret-right text-xl';
+                toggleBtn.setAttribute('aria-expanded', 'false');
+            } else {
+                sidebar.classList.remove('w-[72px]');
+                sidebar.classList.add('w-64');
+                logoText.classList.remove('hidden');
+                sidebarTexts.forEach(t => t.classList.remove('hidden'));
+                navItems.forEach(item => {
+                    item.classList.remove('justify-center', 'px-0');
+                    item.classList.add('px-6');
+                });
+                icon.className = 'ph ph-caret-left text-xl';
+                toggleBtn.setAttribute('aria-expanded', 'true');
+            }
+        }
+
+        function toggleSidebar() {
+            isSidebarCollapsed = !isSidebarCollapsed;
+            applySidebarState();
+
+            // [API] В будущем: PATCH /api/user/preferences { sidebarCollapsed }
+            // [MOCK] Сейчас сохраняем в localStorage.
+            try { localStorage.setItem('sidebarCollapsed', String(isSidebarCollapsed)); } catch (_) {}
+        }
+
+        function initSidebar() {
+            // [API] В будущем: брать из GET /api/user/preferences.
+            // [MOCK] Сейчас — из localStorage.
+            try {
+                if (localStorage.getItem('sidebarCollapsed') === 'true') isSidebarCollapsed = true;
+            } catch (_) {}
+            applySidebarState();
+        }
+
+        // ==========================================
+        // 1. МОКОВЫЕ ДАННЫЕ
+        // [MOCK] Весь блок ниже — заглушка. При подключении бэка удалить и заменить на:
+        //   - POST /api/process    -> { queryId }
+        //   - GET  /api/history    -> массив запросов
+        //   - GET  /api/report/:id -> массив строк (включая vin)
+        // ==========================================
+        const fullNames = [
+            'Иванов Иван Иванович', 'Петров Петр Петрович', 'Сидоров Сидор Сидорович', 'Кузнецов Кузьма Кузьмич', 'Смирнов Семен Семенович',
+            'Попов Павел Павлович', 'Васильев Василий Васильевич', 'Соколов Степан Степанович', 'Михайлов Михаил Михайлович', 'Новиков Николай Николаевич',
+            'Федоров Федор Федорович', 'Морозов Максим Максимович', 'Волков Владимир Владимирович', 'Алексеев Алексей Алексеевич', 'Лебедев Леонид Леонидович',
+            'Семенов Сергей Сергеевич', 'Егоров Егор Егорович', 'Павлов Петр Петрович', 'Козлов Кирилл Кириллович', 'Степанов Станислав Станиславович'
+        ];
+
+        function shortenName(fullName) {
+            const parts = fullName.split(' ');
+            if (parts.length === 3) return `${parts[0]} ${parts[1][0]}.${parts[2][0]}.`;
+            return fullName;
+        }
+
+        // [MOCK] 100 автомобилей
+        const rawRows = [
+            ["XTA21150053912345", "LADA Granta", "2021", "А123ВС 77", 750000, "Высокий", "Ошибка", "https://auto.drom.ru/lada/granta/"],
+            ["XTA219040N0834783", "LADA Vesta", "2022", "В456ЕК 99", 1250000, "Высокий", "Свободно", "https://auto.drom.ru/lada/vesta/"],
+            ["XTAGFL110K1234567", "LADA XRAY", "2019", "С789МН 50", 890000, "Средний", "В залоге", "https://auto.drom.ru/lada/xray/"],
+            ["XTAL219050L1234567", "LADA Largus", "2020", "Е012ОР 78", 980000, "Средний", "Свободно", "https://auto.drom.ru/lada/largus/"],
+            ["Z8NAJL11060517734", "Nissan Almera", "2018", "Р868МН159", 720000, "Низкий", "Ошибка", "https://auto.drom.ru/nissan/almera/"],
+            ["Z7LLSRBYAFH751178", "Renault Logan", "2015", "Н957ВН 32", 540000, "Высокий", "Свободно", "https://auto.drom.ru/renault/logan/"],
+            ["X7LLSRB1FGH123456", "Renault Sandero", "2016", "Т333АА 66", 580000, "Средний", "В залоге", "https://auto.drom.ru/renault/sandero/"],
+            ["X7LLSRB2HGH654321", "Renault Duster", "2017", "У444ВВ 74", 850000, "Высокий", "Свободно", "https://auto.drom.ru/renault/duster/"],
+            ["XW8ZZZ61ZJG123456", "Volkswagen Polo", "2018", "Ф555ГГ 52", 800000, "Высокий", "Ошибка", "https://auto.drom.ru/volkswagen/polo/"],
+            ["XW8ZZZ5NZKG234567", "Volkswagen Tiguan", "2019", "Х666ДД 98", 1850000, "Средний", "Свободно", "https://auto.drom.ru/volkswagen/tiguan/"],
+            ["WVWZZZ1KZAW123456", "Volkswagen Golf", "2010", "Ц777ЕЕ 177", 450000, "Низкий", "В залоге", "https://auto.drom.ru/volkswagen/golf/"],
+            ["WVWZZZ3CZAE123456", "Volkswagen Passat", "2011", "Ч888ЖЖ 199", 650000, "Средний", "Ошибка", "https://auto.drom.ru/volkswagen/passat/"],
+            ["X9FAP51FJ9G123456", "Hyundai Solaris", "2019", "Ш999ЗЗ 750", 850000, "Высокий", "Свободно", "https://auto.drom.ru/hyundai/solaris/"],
+            ["X9FAP81CB9G654321", "Hyundai Creta", "2020", "Щ111ИИ 790", 1350000, "Высокий", "В залоге", "https://auto.drom.ru/hyundai/creta/"],
+            ["KMHCT41DBDU123456", "Hyundai Accent", "2013", "Э222КК 39", 520000, "Средний", "Свободно", "https://auto.drom.ru/hyundai/accent/"],
+            ["KNAG341CBE1234567", "Kia Rio", "2018", "Ю333ЛЛ 161", 780000, "Высокий", "Ошибка", "https://auto.drom.ru/kia/rio/"],
+            ["KNAPB81CBMA123456", "Kia Sportage", "2021", "Я444ММ 116", 2100000, "Средний", "Свободно", "https://auto.drom.ru/kia/sportage/"],
+            ["KNAG341CBE7654321", "Kia Cerato", "2017", "А555НН 777", 950000, "Средний", "В залоге", "https://auto.drom.ru/kia/cerato/"],
+            ["JTDBR32E720123456", "Toyota Corolla", "2012", "Б666ОО 178", 750000, "Высокий", "Ошибка", "https://auto.drom.ru/toyota/corolla/"],
+            ["JTNBE46KX73012345", "Toyota Camry", "2019", "В777ПП 199", 1900000, "Высокий", "Свободно", "https://auto.drom.ru/toyota/camry/"],
+            ["JTMBFREV60J123456", "Toyota RAV4", "2018", "Г888РР 750", 1800000, "Высокий", "В залоге", "https://auto.drom.ru/toyota/rav4/"],
+            ["JTEHH20VX00123456", "Toyota Land Cruiser", "2015", "Д999СС 799", 3500000, "Низкий", "Свободно", "https://auto.drom.ru/toyota/land_cruiser/"],
+            ["JN1TANT31U0123456", "Nissan Qashqai", "2019", "Е111ТТ 177", 1400000, "Средний", "Ошибка", "https://auto.drom.ru/nissan/qashqai/"],
+            ["JN1TANT31U0654321", "Nissan X-Trail", "2018", "Ж222УУ 199", 1550000, "Средний", "Свободно", "https://auto.drom.ru/nissan/x-trail/"],
+            ["JN1FAAK12U0123456", "Nissan Terrano", "2016", "З333ФФ 750", 850000, "Средний", "В залоге", "https://auto.drom.ru/nissan/terrano/"],
+            ["JM1BL1H5XA1234567", "Mazda 3", "2017", "И444ХХ 790", 1000000, "Средний", "Ошибка", "https://auto.drom.ru/mazda/3/"],
+            ["JMZKE123456789012", "Mazda CX-5", "2020", "К555ЦЦ 39", 2000000, "Высокий", "Свободно", "https://auto.drom.ru/mazda/cx-5/"],
+            ["JM1BL1H5XA7654321", "Mazda 6", "2018", "Л666ЧЧ 161", 1300000, "Средний", "В залоге", "https://auto.drom.ru/mazda/6/"],
+            ["JF1SH123456789012", "Subaru Forester", "2019", "М777ШШ 116", 1900000, "Низкий", "Свободно", "https://auto.drom.ru/subaru/forester/"],
+            ["JF1GP123456789012", "Subaru Outback", "2018", "Н888ЩЩ 777", 1700000, "Низкий", "Ошибка", "https://auto.drom.ru/subaru/outback/"],
+            ["JF1BR123456789012", "Subaru XV", "2017", "О999ЭЭ 178", 1200000, "Низкий", "Свободно", "https://auto.drom.ru/subaru/xv/"],
+            ["WBA8E11050K123456", "BMW 3 серии", "2019", "П111ЮЮ 199", 2400000, "Средний", "В залоге", "https://auto.drom.ru/bmw/3er/"],
+            ["WBAKS410500123456", "BMW 5 серии", "2020", "Р222ЯЯ 750", 3200000, "Средний", "Ошибка", "https://auto.drom.ru/bmw/5er/"],
+            ["WBAXG110700123456", "BMW X5", "2019", "С333АА 799", 4500000, "Низкий", "Свободно", "https://auto.drom.ru/bmw/x5/"],
+            ["WBAVL310500123456", "BMW X1", "2018", "Т444ББ 777", 2000000, "Средний", "В залоге", "https://auto.drom.ru/bmw/x1/"],
+            ["WDD2050401A123456", "Mercedes-Benz C-класс", "2019", "У555ВВ 178", 2600000, "Средний", "Свободно", "https://auto.drom.ru/mercedes-benz/c-class/"],
+            ["WDD2130421A123456", "Mercedes-Benz E-класс", "2020", "Ф666ГГ 199", 3500000, "Средний", "Ошибка", "https://auto.drom.ru/mercedes-benz/e-class/"],
+            ["WDC1660241A123456", "Mercedes-Benz GLC", "2018", "Х777ДД 750", 3000000, "Средний", "В залоге", "https://auto.drom.ru/mercedes-benz/glc/"],
+            ["WDD1760421J123456", "Mercedes-Benz A-класс", "2017", "Ц888ЕЕ 799", 1500000, "Низкий", "Свободно", "https://auto.drom.ru/mercedes-benz/a-class/"],
+            ["WAUZZZ8V5JA123456", "Audi A3", "2018", "Ч999ЖЖ 777", 1600000, "Низкий", "Ошибка", "https://auto.drom.ru/audi/a3/"],
+            ["WAUZZZ8W5BA123456", "Audi A4", "2019", "Ш111ЗЗ 178", 2100000, "Средний", "Свободно", "https://auto.drom.ru/audi/a4/"],
+            ["WAUZZZ4G5CA123456", "Audi A6", "2020", "Щ222ИИ 199", 3000000, "Средний", "В залоге", "https://auto.drom.ru/audi/a6/"],
+            ["WAUZZZ8R5DA123456", "Audi Q5", "2019", "Э333КК 750", 2900000, "Средний", "Ошибка", "https://auto.drom.ru/audi/q5/"],
+            ["WVWZZZ1JZ3W123456", "Skoda Octavia", "2018", "Ю444ЛЛ 799", 1100000, "Высокий", "Свободно", "https://auto.drom.ru/skoda/octavia/"],
+            ["TMBJJ7NE5J0123456", "Skoda Kodiaq", "2019", "Я555ММ 777", 2000000, "Средний", "В залоге", "https://auto.drom.ru/skoda/kodiaq/"],
+            ["TMBEM7NE5J0654321", "Skoda Rapid", "2017", "А666НН 178", 800000, "Высокий", "Свободно", "https://auto.drom.ru/skoda/rapid/"],
+            ["VF1RFB00554123456", "Renault Kaptur", "2018", "Б777ОО 199", 950000, "Средний", "Ошибка", "https://auto.drom.ru/renault/kaptur/"],
+            ["VF1HJD40554123456", "Renault Arkana", "2021", "В888ПП 750", 1600000, "Средний", "В залоге", "https://auto.drom.ru/renault/arkana/"],
+            ["XLRTEH4100G123456", "Peugeot 308", "2016", "Г999РР 799", 700000, "Низкий", "Свободно", "https://auto.drom.ru/peugeot/308/"],
+            ["XLRTEH4100G654321", "Peugeot 408", "2017", "Д111СС 777", 850000, "Низкий", "Ошибка", "https://auto.drom.ru/peugeot/408/"],
+            ["VF3XXXXXX12345678", "Citroen C4", "2015", "Е222ТТ 178", 650000, "Низкий", "Свободно", "https://auto.drom.ru/citroen/c4/"],
+            ["VF7XXXXXX12345678", "Citroen C5 Aircross", "2019", "Ж333УУ 199", 1500000, "Низкий", "В залоге", "https://auto.drom.ru/citroen/c5_aircross/"],
+            ["ZFA35600006123456", "Fiat Ducato", "2018", "З444ФФ 750", 1800000, "Низкий", "Ошибка", "https://auto.drom.ru/fiat/ducato/"],
+            ["ZFA19900001234567", "Fiat 500", "2013", "И555ХХ 799", 550000, "Низкий", "Свободно", "https://auto.drom.ru/fiat/500/"],
+            ["YV1FS123456789012", "Volvo S60", "2017", "К666ЦЦ 777", 1600000, "Низкий", "В залоге", "https://auto.drom.ru/volvo/s60/"],
+            ["YV1DZ123456789012", "Volvo XC60", "2018", "Л777ЧЧ 178", 2500000, "Средний", "Свободно", "https://auto.drom.ru/volvo/xc60/"],
+            ["YV1CZ123456789012", "Volvo XC90", "2019", "М888ШШ 199", 3800000, "Низкий", "Ошибка", "https://auto.drom.ru/volvo/xc90/"],
+            ["SAJAA123456789012", "Jaguar XF", "2016", "Н999ЩЩ 750", 2000000, "Низкий", "В залоге", "https://auto.drom.ru/jaguar/xf/"],
+            ["SAJBB123456789012", "Jaguar F-Pace", "2018", "О111ЭЭ 799", 3200000, "Низкий", "Свободно", "https://auto.drom.ru/jaguar/f-pace/"],
+            ["SALVA123456789012", "Land Rover Range Rover", "2017", "П222ЮЮ 777", 4000000, "Низкий", "Ошибка", "https://auto.drom.ru/land_rover/range_rover/"],
+            ["SALCA123456789012", "Land Rover Discovery", "2018", "Р333ЯЯ 178", 3500000, "Низкий", "Свободно", "https://auto.drom.ru/land_rover/discovery/"],
+            ["SALFA123456789012", "Land Rover Freelander", "2014", "С444АА 199", 1200000, "Низкий", "В залоге", "https://auto.drom.ru/land_rover/freelander/"],
+            ["WP1ZZZ95ZFL123456", "Porsche Macan", "2019", "Т555ББ 750", 4500000, "Низкий", "Ошибка", "https://auto.drom.ru/porsche/macan/"],
+            ["WP1ZZZ92ZGL123456", "Porsche Cayenne", "2020", "У666ВВ 799", 6000000, "Низкий", "Свободно", "https://auto.drom.ru/porsche/cayenne/"],
+            ["WP0ZZZ99ZGS123456", "Porsche 911", "2017", "Ф777ГГ 777", 7500000, "Низкий", "В залоге", "https://auto.drom.ru/porsche/911/"],
+            ["ZAM12345678901234", "Maserati Ghibli", "2018", "Х888ДД 178", 4000000, "Низкий", "Свободно", "https://auto.drom.ru/maserati/ghibli/"],
+            ["ZAM12345678901235", "Maserati Levante", "2019", "Ц999ЕЕ 199", 5500000, "Низкий", "Ошибка", "https://auto.drom.ru/maserati/levante/"],
+            ["ZFF12345678901234", "Ferrari California", "2015", "Ч111ЖЖ 750", 9000000, "Низкий", "В залоге", "https://auto.drom.ru/ferrari/california/"],
+            ["ZFF12345678901235", "Ferrari 488", "2017", "Ш222ЗЗ 799", 15000000, "Низкий", "Свободно", "https://auto.drom.ru/ferrari/488/"],
+            ["ZHW12345678901234", "Lamborghini Huracan", "2018", "Щ333ИИ 777", 18000000, "Низкий", "Ошибка", "https://auto.drom.ru/lamborghini/huracan/"],
+            ["ZHW12345678901235", "Lamborghini Urus", "2020", "Э444КК 178", 25000000, "Низкий", "Свободно", "https://auto.drom.ru/lamborghini/urus/"],
+            ["WAUZZZ4M5DA123456", "Audi Q7", "2018", "Ю555ЛЛ 199", 3800000, "Средний", "В залоге", "https://auto.drom.ru/audi/q7/"],
+            ["WAUZZZ4L5BA123456", "Audi Q3", "2017", "Я666ММ 750", 1900000, "Средний", "Ошибка", "https://auto.drom.ru/audi/q3/"],
+            ["WBA7E210500123456", "BMW 7 серии", "2019", "А777НН 799", 5500000, "Низкий", "Свободно", "https://auto.drom.ru/bmw/7er/"],
+            ["WBAXX110700123456", "BMW X6", "2018", "Б888ОО 777", 4800000, "Низкий", "В залоге", "https://auto.drom.ru/bmw/x6/"],
+            ["WBAVM110500123456", "BMW X3", "2019", "В999ПП 178", 3000000, "Средний", "Свободно", "https://auto.drom.ru/bmw/x3/"],
+            ["WDD2050421A123456", "Mercedes-Benz C-класс (AMG)", "2020", "Г111РР 199", 3500000, "Низкий", "Ошибка", "https://auto.drom.ru/mercedes-benz/c-class/amg/"],
+            ["WDD2130431A123456", "Mercedes-Benz E-класс (AMG)", "2019", "Д222СС 750", 4200000, "Низкий", "В залоге", "https://auto.drom.ru/mercedes-benz/e-class/amg/"],
+            ["WDC1660631A123456", "Mercedes-Benz GLE", "2018", "Е333ТТ 799", 3800000, "Средний", "Свободно", "https://auto.drom.ru/mercedes-benz/gle/"],
+            ["WDC1668241A123456", "Mercedes-Benz GLS", "2019", "Ж444УУ 777", 5000000, "Низкий", "Ошибка", "https://auto.drom.ru/mercedes-benz/gls/"],
+            ["JTJHY00WX04123456", "Lexus LX", "2017", "З555ФФ 178", 5500000, "Низкий", "Свободно", "https://auto.drom.ru/lexus/lx/"],
+            ["JTJBAMCA002123456", "Lexus RX", "2019", "И666ХХ 199", 3500000, "Средний", "В залоге", "https://auto.drom.ru/lexus/rx/"],
+            ["JTJBC11A502123456", "Lexus NX", "2018", "К777ЦЦ 750", 2800000, "Средний", "Ошибка", "https://auto.drom.ru/lexus/nx/"],
+            ["JTHBF1D20F5123456", "Lexus ES", "2018", "Л888ЧЧ 799", 2500000, "Низкий", "Свободно", "https://auto.drom.ru/lexus/es/"],
+            ["JTHKD5BH102123456", "Lexus CT", "2013", "М999ШШ 777", 1000000, "Низкий", "В залоге", "https://auto.drom.ru/lexus/ct/"],
+            ["5YJ3E1EA1KF123456", "Tesla Model 3", "2019", "Н111ЩЩ 178", 2800000, "Низкий", "Свободно", "https://auto.drom.ru/tesla/model_3/"],
+            ["5YJSA1E26HF123456", "Tesla Model S", "2017", "О222ЭЭ 199", 3500000, "Низкий", "Ошибка", "https://auto.drom.ru/tesla/model_s/"],
+            ["5YJXCAE26GF123456", "Tesla Model X", "2018", "П333ЮЮ 750", 4500000, "Низкий", "В залоге", "https://auto.drom.ru/tesla/model_x/"],
+            ["7SAYGDEE0NF123456", "Tesla Model Y", "2021", "Р444ЯЯ 799", 3800000, "Средний", "Свободно", "https://auto.drom.ru/tesla/model_y/"],
+            ["KM8J3CA46JU123456", "Hyundai Tucson", "2018", "С555АА 777", 1600000, "Средний", "Ошибка", "https://auto.drom.ru/hyundai/tucson/"],
+            ["KMHXX00XXXX123456", "Hyundai ix35", "2014", "Т666ББ 178", 900000, "Низкий", "Свободно", "https://auto.drom.ru/hyundai/ix35/"],
+            ["KNAB2512AM1234567", "Kia Soul", "2019", "У777ВВ 199", 1100000, "Низкий", "В залоге", "https://auto.drom.ru/kia/soul/"],
+            ["KNAFZ412AG1234567", "Kia Sorento", "2018", "Ф888ГГ 750", 1900000, "Средний", "Ошибка", "https://auto.drom.ru/kia/sorento/"],
+            ["KNAGZ412AG1234567", "Kia Optima", "2017", "Х999ДД 799", 1100000, "Низкий", "Свободно", "https://auto.drom.ru/kia/optima/"],
+            ["KNAB3512AM1234567", "Kia Picanto", "2016", "Ц111ЕЕ 777", 550000, "Низкий", "В залоге", "https://auto.drom.ru/kia/picanto/"],
+            ["JTDBT923401123456", "Toyota Yaris", "2012", "Ч222ЖЖ 178", 600000, "Низкий", "Свободно", "https://auto.drom.ru/toyota/yaris/"],
+            ["JTEBU5JR8F5123456", "Toyota Land Cruiser Prado", "2018", "Ш333ЗЗ 199", 3200000, "Низкий", "Ошибка", "https://auto.drom.ru/toyota/land_cruiser_prado/"],
+            ["JTMHV05J404123456", "Toyota Highlander", "2019", "Щ444ИИ 750", 2800000, "Низкий", "В залоге", "https://auto.drom.ru/toyota/highlander/"],
+            ["JTNBE46KX73123456", "Toyota Avensis", "2015", "Э555КК 799", 900000, "Низкий", "Свободно", "https://auto.drom.ru/toyota/avensis/"],
+            ["VF1RFC00554123456", "Renault Megane", "2016", "Ю666ЛЛ 777", 750000, "Низкий", "Ошибка", "https://auto.drom.ru/renault/megane/"]
+        ];
+
+        const allCars = rawRows.map((row, index) => {
+            const queryId = Math.floor(index / 10) + 1;
+            const inn = '77' + String(Math.floor(Math.random() * 9000000000) + 1000000000);
+            const debtAmount = Math.floor(row[4] * (0.5 + Math.random() * 0.8));
+            const fullName = fullNames[index % fullNames.length];
+
+            return {
+                id: index,
+                vin: row[0],
+                model: row[1],
+                year: row[2],
+                plate: row[3],
+                price: row[4],
+                demand: row[5],
+                status: row[6],
+                link: row[7],
+                inn: inn,
+                debtAmount: debtAmount,
+                fullDebtor: fullName,
+                shortDebtor: shortenName(fullName),
+                queryId: queryId,
+                checked: true
+            };
+        });
+
+        // [MOCK] История — 10 запросов по 10 авто
+        let historyData = [];
+        for (let i = 1; i <= 10; i++) {
+            const carsInQuery = allCars.filter(c => c.queryId === i);
+            const dateObj = new Date(Date.now() - Math.random() * 10000000000);
+            historyData.push({
+                id: i,
+                name: `Запрос ${i}`,
+                date: dateObj.toLocaleDateString('ru-RU'),
+                time: dateObj.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                rawDate: dateObj.toISOString(),
+                user: ['Костарева Полина', 'Смирных Михаил', 'Мирнова Наталья', 'Качурин Никита', 'Уланов Никита'][i % 5],
+                carsCount: carsInQuery.length,
+                searchString: carsInQuery.map(c => `${c.vin} ${c.model} ${c.fullDebtor} ${c.plate} ${c.inn}`).join(' ').toLowerCase()
+            });
+        }
+        historyData.sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate));
+
+        // ==========================================
+        // 2. ФОРМАТИРОВАНИЕ ВВОДА
+        // ==========================================
+        function formatDebtInput(input) {
+            let value = input.value.replace(/\D/g, '');
+            if (value) {
+                value = parseInt(value, 10).toLocaleString('ru-RU');
+            }
+            input.value = value;
+        }
+
+        // ==========================================
+        // 3. АУТЕНТИФИКАЦИЯ И НАВИГАЦИЯ
+        // ==========================================
+        document.getElementById('login-form').addEventListener('submit', handleLogin);
+
+        function handleLogin(e) {
+            if (e) e.preventDefault();
+            /*
+             * [API] POST /api/login
+             *   const res = await fetch('/api/login', {
+             *     method: 'POST',
+             *     headers: { 'Content-Type': 'application/json' },
+             *     body: JSON.stringify({ email, password })
+             *   });
+             *   const { token, user } = await res.json();
+             *   localStorage.setItem('token', token);
+             *   applyUserProfile(user); // обновить #user-name-display / #user-email-display
+             */
+            const email = document.getElementById('login-email').value;
+
+            document.getElementById('auth-screen').classList.add('opacity-0');
+            setTimeout(() => {
+                document.getElementById('auth-screen').classList.add('hidden');
+                const app = document.getElementById('app-container');
+                app.classList.remove('hidden');
+                setTimeout(() => app.classList.remove('opacity-0'), 50);
+
+                // [API] GET /api/me — обновить профиль
+                document.getElementById('user-email-display').textContent = email;
+
+                switchView('upload');
+                renderHistoryTable();
+            }, 300);
+        }
+
+        function handleLogout() {
+            // [API] POST /api/logout, localStorage.removeItem('token')
+            document.getElementById('user-menu').classList.add('hidden');
+            document.getElementById('user-menu-trigger').setAttribute('aria-expanded', 'false');
+            const app = document.getElementById('app-container');
+            app.classList.add('opacity-0');
+
+            setTimeout(() => {
+                app.classList.add('hidden');
+                document.getElementById('auth-screen').classList.remove('hidden');
+                setTimeout(() => document.getElementById('auth-screen').classList.remove('opacity-0'), 50);
+            }, 300);
+        }
+
+        function toggleUserMenu(e) {
+            if (e) e.stopPropagation();
+            const menu = document.getElementById('user-menu');
+            const trigger = document.getElementById('user-menu-trigger');
+            const isHidden = menu.classList.toggle('hidden');
+            trigger.setAttribute('aria-expanded', String(!isHidden));
+        }
+
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('user-menu');
+            const trigger = document.getElementById('user-menu-trigger');
+            if (menu.classList.contains('hidden')) return;
+            if (trigger.contains(e.target) || menu.contains(e.target)) return;
+            menu.classList.add('hidden');
+            trigger.setAttribute('aria-expanded', 'false');
+        });
+
+        function switchView(viewName) {
+            ['view-upload', 'view-history', 'view-report'].forEach(id =>
+                document.getElementById(id).classList.add('hidden'));
+
+            // Меняем только «цветовые» классы — layout (px-6/px-0, justify-center)
+            // не трогаем, иначе свёрнутый сайдбар раскрывается при переключении вкладки.
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.add('text-gray-600', 'hover:bg-gray-50');
+                item.classList.remove('bg-blue-600', 'text-white');
+            });
+
+            if (viewName === 'upload') {
+                document.getElementById('view-upload').classList.remove('hidden');
+                const btn = document.getElementById('nav-upload');
+                btn.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                btn.classList.add('bg-blue-600', 'text-white');
+            } else if (viewName === 'history') {
+                document.getElementById('view-history').classList.remove('hidden');
+                const btn = document.getElementById('nav-history');
+                btn.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                btn.classList.add('bg-blue-600', 'text-white');
+            } else if (viewName === 'report') {
+                document.getElementById('view-report').classList.remove('hidden');
+            }
+        }
+
+        // ==========================================
+        // 4. ЗАГРУЗКА ФАЙЛОВ
+        // ==========================================
+        let uploadedFiles = [];
+        let isProcessing = false;
+        const MAX_FILES = 50;
+        const MAX_FILE_SIZE = 25 * 1024 * 1024;
+        const ALLOWED_EXTENSIONS = ['.pdf', '.html'];
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileList = document.getElementById('file-list');
+        const fileListContainer = document.getElementById('file-list-container');
+        const fileCountSpan = document.getElementById('file-count');
+        const btnProcess = document.getElementById('btn-process');
+        const uploadError = document.getElementById('upload-error');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInput.click();
+            }
+        });
+        fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); fileInput.value = ''; });
+
+        let dragCounter = 0;
+        dropZone.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            if (dragCounter === 1) dropZone.classList.add('bg-blue-50', 'border-blue-400');
+        });
+        dropZone.addEventListener('dragover', (e) => e.preventDefault());
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+            }
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        function showUploadErrors(errors) {
+            if (!errors.length) {
+                uploadError.classList.add('hidden');
+                uploadError.textContent = '';
+                return;
+            }
+            uploadError.innerHTML = '';
+            const ul = document.createElement('ul');
+            ul.className = 'list-disc pl-5 space-y-1';
+            errors.forEach(msg => {
+                const li = document.createElement('li');
+                li.textContent = msg;
+                ul.appendChild(li);
+            });
+            uploadError.appendChild(ul);
+            uploadError.classList.remove('hidden');
+        }
+
+        function handleFiles(files) {
+            const errors = [];
+            for (const file of files) {
+                if (uploadedFiles.length >= MAX_FILES) {
+                    errors.push('Достигнут лимит: максимум 50 файлов.');
+                    break;
+                }
+                const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+                if (!ALLOWED_EXTENSIONS.includes(fileExt)) {
+                    errors.push(`«${file.name}»: неверный формат (разрешены .pdf и .html).`);
+                    continue;
+                }
+                if (file.size > MAX_FILE_SIZE) {
+                    errors.push(`«${file.name}»: файл больше ${MAX_FILE_SIZE / (1024 * 1024)} МБ.`);
+                    continue;
+                }
+                const isDuplicate = uploadedFiles.some(f => f.name === file.name && f.size === file.size);
+                if (isDuplicate) continue;
+                uploadedFiles.push(file);
+            }
+            showUploadErrors(errors);
+            renderFiles();
+        }
+
+        function renderFiles() {
+            fileList.innerHTML = '';
+            fileCountSpan.textContent = uploadedFiles.length;
+
+            if (uploadedFiles.length > 0) {
+                fileListContainer.classList.remove('hidden');
+            } else {
+                fileListContainer.classList.add('hidden');
+            }
+
+            const shouldDisable = uploadedFiles.length === 0 || isProcessing;
+            btnProcess.disabled = shouldDisable;
+            btnProcess.textContent = isProcessing ? 'Обработка…' : 'Запустить обработку';
+            if (shouldDisable) {
+                btnProcess.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                btnProcess.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+
+            uploadedFiles.forEach((file, index) => {
+                const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+                const isPdf = file.name.toLowerCase().endsWith('.pdf');
+
+                const fileEl = document.createElement('div');
+                fileEl.className = "flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 group hover:border-blue-300 transition-all fade-in";
+
+                const left = document.createElement('div');
+                left.className = "flex items-center gap-3 min-w-0";
+
+                const iconBox = document.createElement('div');
+                iconBox.className = "w-10 h-10 bg-blue-100 text-blue-600 rounded flex items-center justify-center flex-shrink-0";
+                const icon = document.createElement('i');
+                icon.className = `ph ph-file-${isPdf ? 'pdf' : 'html'} text-xl`;
+                icon.setAttribute('aria-hidden', 'true');
+                iconBox.appendChild(icon);
+
+                const meta = document.createElement('div');
+                meta.className = "min-w-0";
+                const nameEl = document.createElement('div');
+                nameEl.className = "text-sm font-medium text-gray-900 truncate max-w-xs";
+                nameEl.textContent = file.name;
+                nameEl.title = file.name;
+                const sizeEl = document.createElement('div');
+                sizeEl.className = "text-xs text-gray-500";
+                sizeEl.textContent = `${sizeMB} МБ`;
+                meta.append(nameEl, sizeEl);
+
+                left.append(iconBox, meta);
+
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = "text-gray-400 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all";
+                removeBtn.setAttribute('aria-label', `Удалить файл ${file.name}`);
+                removeBtn.dataset.removeIndex = String(index);
+                const removeIcon = document.createElement('i');
+                removeIcon.className = "ph ph-x-circle text-xl";
+                removeIcon.setAttribute('aria-hidden', 'true');
+                removeBtn.appendChild(removeIcon);
+
+                fileEl.append(left, removeBtn);
+                fileList.appendChild(fileEl);
+            });
+        }
+
+        fileList.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-remove-index]');
+            if (!btn) return;
+            removeFile(Number(btn.dataset.removeIndex));
+        });
+
+        function removeFile(index) { uploadedFiles.splice(index, 1); renderFiles(); }
+        function clearFiles() { uploadedFiles = []; showUploadErrors([]); renderFiles(); }
+
+        // ==========================================
+        // 5. ОТЧЕТ: ОБРАБОТКА, ФИЛЬТРАЦИЯ, ЧЕКБОКСЫ
+        // ==========================================
+        let currentReportCars = [];
+        let currentFilter = 'all';
+        let currentDemandFilter = 'all';
+        let currentSort = null;
+        let reportTimer = null;
+
+        const reportTbody = document.getElementById('report-tbody');
+
+        function startProcessing() {
+            if (isProcessing || uploadedFiles.length === 0) return;
+
+            /*
+             * [API] POST /api/process
+             *   const fd = new FormData();
+             *   uploadedFiles.forEach(f => fd.append('files[]', f));
+             *   fd.append('minDebt', parseDebtInput(minDebtInput.value));
+             *   const res = await fetch('/api/process', { method: 'POST', body: fd });
+             *   const { queryId } = await res.json();
+             * Затем поллинг GET /api/report/{queryId} до готовности.
+             */
+            isProcessing = true;
+            renderFiles();
+
+            const newQueryId = historyData.length > 0 ? Math.max(...historyData.map(h => h.id)) + 1 : 1;
+            const now = new Date();
+
+            const newCars = allCars.slice(0, 10).map(c => ({
+                ...c,
+                id: Math.random(),
+                queryId: newQueryId,
+                checked: true
+            }));
+
+            const newHistoryItem = {
+                id: newQueryId,
+                name: `Запрос ${newQueryId}`,
+                date: now.toLocaleDateString('ru-RU'),
+                time: now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                rawDate: now.toISOString(),
+                user: 'Костарева Полина',
+                carsCount: newCars.length,
+                searchString: newCars.map(c => `${c.vin} ${c.model} ${c.fullDebtor} ${c.plate} ${c.inn}`).join(' ').toLowerCase()
+            };
+
+            historyData.unshift(newHistoryItem);
+            renderHistoryTable();
+
+            openReport(newHistoryItem.name, newQueryId, newCars, true);
+        }
+
+        function openReportById(id) {
+            const item = historyData.find(h => h.id === id);
+            if (!item) return;
+            openReport(item.name, item.id, null, false);
+        }
+
+        function openReport(requestName, queryId, customCars = null, isNew = false) {
+            if (reportTimer) {
+                clearTimeout(reportTimer);
+                reportTimer = null;
+            }
+
+            document.getElementById('report-title').textContent = requestName;
+            switchView('report');
+
+            /*
+             * [API] GET /api/report/{queryId}
+             * Ответ — массив строк с полями:
+             *   id, vin, model, year, plate, price, demand, status, link,
+             *   inn, debtAmount, fullDebtor
+             * Поле vin участвует в таблице и XLSX.
+             */
+            if (customCars) {
+                currentReportCars = customCars;
+            } else {
+                currentReportCars = allCars.filter(c => c.queryId === queryId).map(c => ({...c, checked: true}));
+                if (currentReportCars.length === 0) {
+                    currentReportCars = allCars.slice(0, 10).map(c => ({...c, id: Math.random(), checked: true}));
+                }
+            }
+
+            currentFilter = 'all';
+            currentDemandFilter = 'all';
+            currentSort = null;
+            document.getElementById('demand-select').value = 'all';
+            updateFilterUI();
+
+            if (isNew) {
+                showReportLoadingState();
+            } else {
+                document.getElementById('banner-loading').classList.add('hidden');
+                document.getElementById('banner-success').classList.remove('hidden');
+                document.getElementById('table-skeleton').classList.add('hidden');
+                document.getElementById('table-data').classList.remove('hidden');
+                document.getElementById('report-filters').classList.remove('opacity-50', 'pointer-events-none');
+                renderReportTable();
+            }
+        }
+
+        function showReportLoadingState() {
+            if (reportTimer) {
+                clearTimeout(reportTimer);
+                reportTimer = null;
+            }
+
+            document.getElementById('banner-loading').classList.remove('hidden');
+            document.getElementById('banner-success').classList.add('hidden');
+            document.getElementById('table-skeleton').classList.remove('hidden');
+            document.getElementById('table-data').classList.add('hidden');
+
+            document.getElementById('btn-download-report').disabled = true;
+            document.getElementById('btn-download-report').classList.add('opacity-50', 'cursor-not-allowed');
+            document.getElementById('report-filters').classList.add('opacity-50', 'pointer-events-none');
+
+            // [API] Здесь должен завершиться поллинг статуса обработки:
+            //   GET /api/report/{queryId} -> { status: 'ready', rows: [...] }
+            reportTimer = setTimeout(() => {
+                reportTimer = null;
+                document.getElementById('banner-loading').classList.add('hidden');
+                document.getElementById('banner-success').classList.remove('hidden');
+                document.getElementById('table-skeleton').classList.add('hidden');
+                document.getElementById('table-data').classList.remove('hidden');
+                document.getElementById('report-filters').classList.remove('opacity-50', 'pointer-events-none');
+
+                renderReportTable();
+
+                isProcessing = false;
+                clearFiles();
+            }, 2000);
+        }
+
+        function renderReportTable() {
+            let filteredData = [...currentReportCars];
+            if (currentFilter === 'free') filteredData = filteredData.filter(c => c.status === 'Свободно');
+            if (currentFilter === 'pledged') filteredData = filteredData.filter(c => c.status === 'В залоге');
+            if (currentDemandFilter !== 'all') filteredData = filteredData.filter(c => c.demand === currentDemandFilter);
+
+            if (currentSort === 'asc') filteredData.sort((a, b) => a.price - b.price);
+            else if (currentSort === 'desc') filteredData.sort((a, b) => b.price - a.price);
+
+            if (filteredData.length === 0) {
+                // colspan = 13 (включая VIN)
+                reportTbody.innerHTML = `<tr><td colspan="13" class="text-center py-8 text-gray-500">Нет данных, удовлетворяющих условиям фильтра</td></tr>`;
+                updateSelectAllCheckboxState();
+                updateSelectedCount();
+                return;
+            }
+
+            reportTbody.innerHTML = filteredData.map(car => {
+                const statusBadge =
+                    car.status === 'Свободно' ? '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium">Свободно</span>' :
+                    car.status === 'В залоге'  ? '<span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">В залоге</span>' :
+                    car.status === 'Ошибка'    ? '<span class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium">Ошибка</span>' : '';
+
+                const formattedPrice = car.price > 0 ? car.price.toLocaleString('ru-RU') : '-';
+                const formattedDebt  = car.debtAmount > 0 ? car.debtAmount.toLocaleString('ru-RU') : '-';
+
+                // ВАЖНО: safeUrl больше не зависит от location.origin.
+                // Абсолютные https-URL (как в моке) проходят через new URL(url) без базы
+                // и возвращаются как есть. Относительные — только если origin валиден.
+                const href = escapeHtml(safeUrl(car.link));
+                const demandHtml = car.demand
+                    ? `<span class="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">${escapeHtml(car.demand)}</span>`
+                    : '';
+
+                return `
+                <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors group">
+                    <td class="py-3 px-2">
+                        <input type="checkbox" class="row-checkbox" data-id="${escapeHtml(car.id)}"
+                               ${car.checked ? 'checked' : ''}
+                               aria-label="Выбрать строку ${escapeHtml(car.fullDebtor)}">
+                    </td>
+                    <td class="py-3 px-2 text-gray-900 font-medium relative group/tooltip">
+                        <span class="cursor-help border-b border-dashed border-gray-400">${escapeHtml(car.shortDebtor)}</span>
+                        <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/tooltip:block bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-50 shadow-lg">
+                            ${escapeHtml(car.fullDebtor)}
+                            <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-gray-600 font-mono text-xs">${escapeHtml(car.inn)}</td>
+                    <td class="py-3 px-2 text-red-600 font-medium">${formattedDebt} ₽</td>
+                    <td class="py-3 px-2 text-gray-700 font-mono text-xs">${escapeHtml(car.vin)}</td>
+                    <td class="py-3 px-2 text-gray-900 font-medium">${escapeHtml(car.model)}</td>
+                    <td class="py-3 px-2 text-gray-600 text-center">${escapeHtml(car.year)}</td>
+                    <td class="py-3 px-2 text-gray-600 uppercase font-mono text-xs">${escapeHtml(car.plate)}</td>
+                    <td class="py-3 px-2 text-gray-900">${formattedPrice} ₽</td>
+                    <td class="py-3 px-2">${statusBadge}</td>
+                    <td class="py-3 px-2">${demandHtml}</td>
+                    <td class="py-3 px-2">
+                        <a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">перейти</a>
+                    </td>
+                    <td class="py-3 px-2 text-center text-gray-400 hover:text-gray-800 cursor-pointer transition-colors">
+                        <i class="ph ph-file-text text-lg" aria-hidden="true"></i>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+
+            updateSelectAllCheckboxState();
+            updateSelectedCount();
+        }
+
+        reportTbody.addEventListener('change', (e) => {
+            if (!e.target.matches('.row-checkbox')) return;
+            toggleRowCheckbox(e.target.dataset.id, e.target.checked);
+        });
+
+        function toggleRowCheckbox(id, isChecked) {
+            const car = currentReportCars.find(c => String(c.id) === String(id));
+            if (car) car.checked = isChecked;
+            updateSelectAllCheckboxState();
+            updateSelectedCount();
+        }
+
+        function toggleAllCheckboxes(headerCheckbox) {
+            const isChecked = headerCheckbox.checked;
+            const map = new Map(currentReportCars.map(c => [String(c.id), c]));
+            document.querySelectorAll('.row-checkbox').forEach(cb => {
+                cb.checked = isChecked;
+                const car = map.get(cb.dataset.id);
+                if (car) car.checked = isChecked;
+            });
+            updateSelectedCount();
+        }
+
+        function updateSelectAllCheckboxState() {
+            const headerCb = document.getElementById('select-all-checkbox');
+            const visible = Array.from(document.querySelectorAll('.row-checkbox'));
+            if (visible.length === 0) {
+                headerCb.checked = false;
+                headerCb.indeterminate = false;
+                return;
+            }
+            const checkedVisible = visible.filter(cb => cb.checked).length;
+            headerCb.checked = checkedVisible === visible.length;
+            headerCb.indeterminate = checkedVisible > 0 && checkedVisible < visible.length;
+        }
+
+        function updateSelectedCount() {
+            const selectedCount = currentReportCars.filter(c => c.checked).length;
+            document.getElementById('selected-count').textContent = selectedCount;
+            const btnDownload = document.getElementById('btn-download-report');
+            if (selectedCount > 0) {
+                btnDownload.disabled = false;
+                btnDownload.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                btnDownload.disabled = true;
+                btnDownload.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // ==========================================
+        // 6. СКАЧИВАНИЕ XLSX
+        // [PROD] Для реальной выгрузки — генерировать на бэкенде:
+        //   window.location.href = `/api/download/${queryId}?ids=${ids.join(',')}`;
+        // Локальная генерация ниже — fallback для макета без бэка.
+        // ==========================================
+        let xlsxLoadingPromise = null;
+
+        function loadXlsxLib() {
+            if (window.XLSX) return Promise.resolve(window.XLSX);
+            if (xlsxLoadingPromise) return xlsxLoadingPromise;
+
+            // Используем 0.18.5 — она есть на всех публичных CDN.
+            // Версии 0.19+/0.20+ живут только на cdn.sheetjs.com и на npm/jsdelivr/cdnjs отсутствуют.
+            const sources = [
+                'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+                'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+                'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'
+            ];
+
+            xlsxLoadingPromise = new Promise((resolve, reject) => {
+                let idx = 0;
+                const tryNext = () => {
+                    if (idx >= sources.length) {
+                        xlsxLoadingPromise = null;
+                        reject(new Error('Не удалось загрузить библиотеку XLSX (все CDN недоступны)'));
+                        return;
+                    }
+                    const s = document.createElement('script');
+                    s.src = sources[idx++];
+                    s.onload = () => {
+                        if (window.XLSX) resolve(window.XLSX);
+                        else tryNext();
+                    };
+                    s.onerror = tryNext;
+                    document.head.appendChild(s);
+                };
+                tryNext();
+            });
+
+            return xlsxLoadingPromise;
+        }
+
+        async function downloadSelected() {
+            const selectedCars = currentReportCars.filter(c => c.checked);
+            if (selectedCars.length === 0) return;
+
+            const btn = document.getElementById('btn-download-report');
+            const prevDisabled = btn.disabled;
+            btn.disabled = true;
+
+            try {
+                const XLSX = await loadXlsxLib();
+
+                // Колонки совпадают с таблицей отчёта (включая VIN)
+                const headers = [
+                    'ФИО', 'ИНН', 'Сумма долга', 'VIN', 'Автомобиль', 'Год',
+                    'Госномер', 'Цена рынка', 'Статус', 'Спрос', 'Ссылка'
+                ];
+
+                const data = selectedCars.map(car => [
+                    car.fullDebtor, car.inn, car.debtAmount, car.vin,
+                    car.model, car.year, car.plate, car.price,
+                    car.status, car.demand, car.link
+                ]);
+
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+                ws['!cols'] = [
+                    { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 20 },
+                    { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 40 }
+                ];
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Отчет');
+                XLSX.writeFile(wb, `report_${Date.now()}.xlsx`);
+            } catch (err) {
+                alert('Не удалось скачать отчёт: ' + err.message);
+            } finally {
+                btn.disabled = prevDisabled || selectedCars.length === 0;
+                updateSelectedCount();
+            }
+        }
+
+        // ==========================================
+        // 7. ФИЛЬТРЫ ОТЧЕТА
+        // ==========================================
+        function applyFilter(filterType) {
+            currentFilter = filterType;
+            if (filterType === 'all') {
+                currentDemandFilter = 'all';
+                currentSort = null;
+                document.getElementById('demand-select').value = 'all';
+            }
+            updateFilterUI();
+            renderReportTable();
+        }
+
+        function applyDemandFilter(value) {
+            currentDemandFilter = value;
+            renderReportTable();
+        }
+
+        function toggleSortPrice() {
+            if (currentSort === null) currentSort = 'asc';
+            else if (currentSort === 'asc') currentSort = 'desc';
+            else currentSort = null;
+            updateFilterUI();
+            renderReportTable();
+        }
+
+        function updateFilterUI() {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                if (btn.id !== 'btn-sort-price') {
+                    btn.className = "filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors";
+                }
+            });
+
+            const activeBtn = document.querySelector(`.filter-btn[data-filter="${currentFilter}"]`);
+            if (activeBtn) {
+                activeBtn.className = "filter-btn bg-blue-600 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors";
+            }
+
+            const sortBtn = document.getElementById('btn-sort-price');
+            const sortIcon = sortBtn.querySelector('i');
+            if (currentSort === 'asc') {
+                sortIcon.className = 'ph ph-sort-ascending';
+                sortBtn.classList.add('bg-blue-100', 'text-blue-700', 'border', 'border-blue-200');
+                sortBtn.classList.remove('bg-gray-100', 'text-gray-700');
+            } else if (currentSort === 'desc') {
+                sortIcon.className = 'ph ph-sort-descending';
+                sortBtn.classList.add('bg-blue-100', 'text-blue-700', 'border', 'border-blue-200');
+                sortBtn.classList.remove('bg-gray-100', 'text-gray-700');
+            } else {
+                sortIcon.className = 'ph ph-arrows-down-up';
+                sortBtn.className = "filter-btn bg-gray-100 text-gray-700 hover:bg-gray-200 px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1";
+            }
+        }
+
+        // ==========================================
+        // 8. ИСТОРИЯ ЗАПРОСОВ
+        // ==========================================
+        let historySort = { column: 'rawDate', direction: 'desc' };
+        const historyTbody = document.getElementById('history-tbody');
+
+        function sortHistory(column) {
+            if (historySort.column === column) {
+                historySort.direction = historySort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                historySort.column = column;
+                historySort.direction = 'asc';
+            }
+            renderHistoryTable();
+        }
+
+        function saveRequestName(id, newName) {
+            // [API] PATCH /api/history/{id} { name: newName }
+            const item = historyData.find(h => h.id === id);
+            if (!item) return;
+            const trimmed = String(newName || '').trim();
+            if (trimmed) item.name = trimmed;
+            renderHistoryTable();
+        }
+
+        function renderHistoryTable() {
+            const tbody = historyTbody;
+            const searchQuery = document.getElementById('history-search').value.toLowerCase().trim();
+
+            // [API] GET /api/history?search=...
+            let filteredData = historyData.filter(item => {
+                if (!searchQuery) return true;
+                return item.name.toLowerCase().includes(searchQuery) ||
+                       item.user.toLowerCase().includes(searchQuery) ||
+                       item.searchString.includes(searchQuery);
+            });
+
+            filteredData.sort((a, b) => {
+                let valA = a[historySort.column];
+                let valB = b[historySort.column];
+                if (historySort.column === 'rawDate' || historySort.column === 'date') {
+                    valA = a.rawDate; valB = b.rawDate;
+                }
+                if (valA < valB) return historySort.direction === 'asc' ? -1 : 1;
+                if (valA > valB) return historySort.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            document.getElementById('sort-icon-name').className =
+                `ph ${historySort.column === 'name' ? (historySort.direction === 'asc' ? 'ph-sort-ascending' : 'ph-sort-descending') : 'ph-arrows-down-up'}`;
+            document.getElementById('sort-icon-date').className =
+                `ph ${(historySort.column === 'rawDate' || historySort.column === 'date') ? (historySort.direction === 'asc' ? 'ph-sort-ascending' : 'ph-sort-descending') : 'ph-arrows-down-up'}`;
+
+            if (filteredData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-gray-500">Запросы не найдены</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filteredData.map(row => {
+                const safeName = escapeHtml(row.name);
+                const safeUser = escapeHtml(row.user);
+                const safeSeed = encodeURIComponent(row.user);
+                return `
+                <tr data-id="${row.id}" class="border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors group">
+                    <td class="py-3 px-2 text-sm font-medium text-gray-900 group-hover:text-blue-700 transition-colors">
+                        <div class="flex items-center gap-2">
+                            <span
+                                contenteditable="true"
+                                data-edit-id="${row.id}"
+                                class="editable-name focus:outline-none focus:bg-blue-50 px-1 rounded"
+                                title="Кликните, чтобы изменить название"
+                                role="textbox"
+                                aria-label="Название запроса"
+                            >${safeName}</span>
+                            <i class="ph ph-pencil-simple text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs" aria-hidden="true"></i>
+                            <span class="text-xs text-gray-400 font-normal ml-2">(${row.carsCount} авто)</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-sm text-gray-500 text-center">
+                        <div class="flex flex-col items-center">
+                            <span>${escapeHtml(row.date)}</span>
+                            <span class="text-xs text-gray-400">${escapeHtml(row.time)}</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2">
+                        <div class="flex items-center justify-start gap-2 pl-2">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${safeSeed}&backgroundColor=ffdfbf"
+                                 alt="" class="w-6 h-6 rounded-full bg-orange-100">
+                            <span class="text-sm text-gray-700">${safeUser}</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-right">
+                        <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button type="button" data-action="view"
+                                    class="w-8 h-8 flex items-center justify-center bg-white border border-gray-200 text-gray-600 hover:bg-blue-100 hover:text-blue-600 rounded shadow-sm transition-colors"
+                                    title="Просмотр" aria-label="Открыть запрос ${safeName}">
+                                <i class="ph ph-eye" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        historyTbody.addEventListener('click', (e) => {
+            if (e.target.closest('.editable-name')) return;
+            const tr = e.target.closest('tr[data-id]');
+            if (!tr) return;
+            openReportById(Number(tr.dataset.id));
+        });
+
+        // focusout, а не blur — blur не всплывает
+        historyTbody.addEventListener('focusout', (e) => {
+            const el = e.target.closest('.editable-name');
+            if (!el) return;
+            const id = Number(el.dataset.editId);
+            saveRequestName(id, el.textContent);
+        });
+
+        historyTbody.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.closest('.editable-name')) {
+                e.preventDefault();
+                e.target.blur();
+            }
+        });
+
+        document.getElementById('history-search').addEventListener('input', debounce(renderHistoryTable, 250));
+
+        // ==========================================
+        // 9. ИНИЦИАЛИЗАЦИЯ
+        // ==========================================
+        initSidebar();
+    </script>
+</body>
+</html>

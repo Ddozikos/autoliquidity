@@ -1,0 +1,14 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+sqlalchemy==2.0.35
+pydantic==2.9.2
+python-multipart==0.0.12
+pdfplumber==0.11.4
+pytesseract==0.3.13
+pdf2image==1.17.0
+beautifulsoup4==4.12.3
+lxml==5.3.0
+requests==2.32.3
+gigachat==0.2.3
+python-dotenv==1.0.1
+openpyxl==3.1.5
