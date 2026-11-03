@@ -161,6 +161,26 @@ svg { display: block; flex: none; }
 .alert.success { background: rgba(50,186,118,.15); color: #23854f; }
 .alert.danger { background: #fff0ef; color: #9b3e3e; }
 .alert-close { padding: 2px; border: 0; background: transparent; color: #7f8985; }
+.state-alert {
+  position: relative; min-height: 74px; display: flex; align-items: flex-start; gap: 12px; margin: 0 0 9px;
+  padding: 16px 20px; border-radius: 6px; color: rgba(0,0,0,.85); font-size: 13px;
+}
+.state-alert.danger { min-height: 122px; background: rgba(255,0,61,.15); }
+.state-alert.warning { align-items: center; background: rgba(255,190,92,.3); }
+.state-alert.neutral { align-items: center; background: rgba(107,132,153,.15); }
+.state-alert-icon { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 2px; object-fit: contain; }
+.state-alert.warning .state-alert-icon, .state-alert.neutral .state-alert-icon { margin-top: 0; }
+.state-alert-content { min-width: 0; flex: 1; }
+.state-alert-content strong { display: block; font-size: 15px; font-weight: 500; line-height: 20px; }
+.state-alert-content p { margin: 4px 0 0; color: rgba(0,0,0,.7); font-size: 13px; line-height: 18px; }
+.state-alert.warning .state-alert-content { padding-right: 96px; }
+.state-alert-actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+.state-alert.warning .state-alert-actions { position: absolute; top: 50%; right: 20px; margin: 0; transform: translateY(-50%); }
+.state-alert-button { min-height: 28px; padding: 5px 12px; border: 0; border-radius: 6px; background: #fff; color: rgba(0,0,0,.85); font-size: 13px; line-height: 18px; white-space: nowrap; }
+.state-alert.warning .state-alert-button { background: rgba(189,142,75,.12); }
+.state-alert-button:hover { background: rgba(0,0,0,.06); }
+.state-alert-close { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: #7b8389; }
+.state-alert-close:hover { color: #333; }
 .query-heading { min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 3px; }
 .query-heading h2 { margin: 0; color: #111; font-size: 16px; line-height: 24px; font-weight: 500; }
 .download-button { min-width: 108px; }

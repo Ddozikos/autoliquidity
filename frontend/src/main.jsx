@@ -175,10 +175,20 @@ function StatusBadge({ car }) {
   return <span className={`status-badge ${tone}`} title={review ? 'Проверьте распознанные поля вручную' : `Статус проверки: ${car.status || 'не проверен'}`}>{label}</span>;
 }
 
+function ReportAlert({ variant, title, message, onClose, action }) {
+  return <div className={`state-alert ${variant}`} role={variant === 'neutral' ? 'status' : 'alert'}>
+    <img className="state-alert-icon" src={`/static/icons/alert-${variant}.svg`} alt="" />
+    <div className="state-alert-content"><strong>{title}</strong><p>{message}</p>{action && variant === 'danger' && <div className="state-alert-actions">{action}</div>}</div>
+    {action && variant === 'warning' && <div className="state-alert-actions">{action}</div>}
+    {onClose && <button className="state-alert-close" onClick={onClose} aria-label="Закрыть"><Icon name="close" size={16}/></button>}
+  </div>;
+}
+
 function ReportPage({ token, reportId, onUpload, notify }) {
-  const [report, setReport] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(''), [filter, setFilter] = useState(''), [filterOpen, setFilterOpen] = useState(false), [alertVisible, setAlertVisible] = useState(true), [page, setPage] = useState(1), [selected, setSelected] = useState(new Set()), [modalCar, setModalCar] = useState(null), [downloading, setDownloading] = useState(false);
+  const [report, setReport] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(''), [filter, setFilter] = useState(''), [filterOpen, setFilterOpen] = useState(false), [alertVisible, setAlertVisible] = useState(true), [dismissedAlerts, setDismissedAlerts] = useState(new Set()), [page, setPage] = useState(1), [selected, setSelected] = useState(new Set()), [modalCar, setModalCar] = useState(null), [downloading, setDownloading] = useState(false);
   const timer = useRef(null);
   const filterRef = useRef(null);
+  const tableRef = useRef(null);
   const refresh = useCallback(async (id, first = false) => {
     try {
       const response = await request(`/reports/${id}`, token), data = await response.json();
@@ -187,7 +197,7 @@ function ReportPage({ token, reportId, onUpload, notify }) {
       else setSelected((existing) => existing.size ? existing : new Set((data.cars || []).filter(selectable).map((car) => car.id)));
     } catch (err) { setError(err.message); setLoading(false); }
   }, [token]);
-  useEffect(() => { setReport(null); setError(''); setLoading(true); setSelected(new Set()); refresh(reportId, true); return () => clearTimeout(timer.current); }, [reportId, refresh]);
+  useEffect(() => { setReport(null); setError(''); setLoading(true); setSelected(new Set()); setAlertVisible(true); setDismissedAlerts(new Set()); refresh(reportId, true); return () => clearTimeout(timer.current); }, [reportId, refresh]);
   useEffect(() => {
     const closeOnOutside = (event) => { if (filterRef.current && !filterRef.current.contains(event.target)) setFilterOpen(false); };
     document.addEventListener('pointerdown', closeOnOutside);
@@ -215,18 +225,24 @@ function ReportPage({ token, reportId, onUpload, notify }) {
   const tabStart = Math.max(1, Math.min(page - 2, pageCount - 4));
   const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => tabStart + index);
   const statusOptions = ['Выбрать все', 'Высокий спрос', 'Средний спрос', 'Низкий спрос', 'Требует проверки'];
+  const failed = !loading && (Boolean(error) || report?.status === 'failed');
+  const needsReview = !loading && !error && report?.status === 'ready' && cars.some((car) => Number(car.confidence) < .7);
+  const hasPriceWarning = !loading && !error && report?.status === 'ready' && cars.some((car) => car.market_status === 'partial' && Number(car.price) > 0);
+  const dismissAlert = (key) => setDismissedAlerts((current) => new Set(current).add(key));
   return <section className="report-page">
-    <div className="report-heading"><h1>Просмотр отчета</h1><button className="button primary" onClick={onUpload}>Загрузить постановление</button></div>
+    <div className="report-heading"><h1>Просмотр отчета</h1>{!failed && <button className="button primary" onClick={onUpload}>Загрузить постановление</button>}</div>
+    {failed ? <ReportAlert variant="danger" title="Сбой процесса обработки файлов" message="Обнаружена ошибка доступа к ресурсу. Выполнение задачи прервано для всех объектов." action={<button className="state-alert-button" onClick={onUpload}>Повторить попытку</button>}/> : <>
     {loading && alertVisible && <div className="alert info" role="status"><Icon name="info"/><div><strong>Идет процесс обработки</strong><p>Пожалуйста, подождите: в данный момент выполняется обработка загруженных файлов и формирование отчета. После завершения обработки готовый отчет станет доступен для скачивания в формате Excel (.xlsx). Это может занять некоторое время.</p></div><button className="alert-close" onClick={() => setAlertVisible(false)} aria-label="Закрыть"><Icon name="close" size={16}/></button></div>}
-    {!loading && !error && report?.status === 'ready' && alertVisible && <div className="alert success"><Icon name="check"/><div><strong>Документ обработан</strong><p>Готовый файл доступен для загрузки в формате XLSX.</p></div><button className="alert-close" onClick={() => setAlertVisible(false)} aria-label="Закрыть"><Icon name="close" size={16}/></button></div>}
-    {(error || report?.error_text) && !loading && alertVisible && <div className="alert danger" role="alert"><Icon name="info"/><div><strong>Не удалось полностью обработать пакет</strong><p>{error || report.error_text}</p></div><button className="text-button" onClick={() => refresh(reportId)}>Повторить</button><button className="alert-close" onClick={() => setAlertVisible(false)} aria-label="Закрыть"><Icon name="close" size={16}/></button></div>}
+    {!loading && !error && report?.status === 'ready' && alertVisible && !needsReview && !hasPriceWarning && <div className="alert success"><Icon name="check"/><div><strong>Документ обработан</strong><p>Готовый файл доступен для загрузки в формате XLSX.</p></div><button className="alert-close" onClick={() => setAlertVisible(false)} aria-label="Закрыть"><Icon name="close" size={16}/></button></div>}
+    {needsReview && !dismissedAlerts.has('review') && <ReportAlert variant="warning" title="Документ требует проверки" message="Документ не удалось обработать автоматически. Проверьте его в таблице и завершите обработку вручную." action={<button className="state-alert-button" onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Перейти</button>}/>}
+    {hasPriceWarning && !dismissedAlerts.has('price') && <ReportAlert variant="neutral" title="Документ требует проверки" message="При обработке объекта выявлены замечания к качеству рыночной цены. Ранжирование выполнено. Результат требует ручной обработки." onClose={() => dismissAlert('price')}/>}
     <div className="query-heading"><h2>Запрос</h2><button className="button primary download-button" disabled={!selected.size || downloading || loading} onClick={download}><Icon name="download"/>{downloading ? 'Подготовка…' : 'Скачать'}</button></div>
     <div className="report-controls"><div ref={filterRef} className="status-select" onKeyDown={(e) => e.key === 'Escape' && setFilterOpen(false)}>
       <button className={`status-select-trigger ${filterOpen ? 'open' : ''}`} aria-haspopup="listbox" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}><span>{filter || 'Статус'}</span><Icon name="chevron" size={16}/></button>
       {filterOpen && <div className="status-options" role="listbox" aria-label="Статус">{statusOptions.map((option) => <button key={option} role="option" aria-selected={filter === option || (!filter && option === 'Выбрать все')} onClick={() => { setFilter(option === 'Выбрать все' ? '' : option); setPage(1); setFilterOpen(false); }}>{option}</button>)}</div>}
     </div><span className="result-count">{cars.length} автомобилей в отчёте</span></div>
     <nav className="page-tabs" aria-label="Страницы отчёта">{pageNumbers.map((number) => <button key={number} className={page === number ? 'current' : ''} aria-current={page === number ? 'page' : undefined} onClick={() => setPage(number)}>{number}</button>)}</nav>
-    <div className="report-table-scroll"><table className="report-table"><colgroup><col className="col-check"/><col className="col-name"/><col className="col-inn"/><col className="col-debt"/><col className="col-vin"/><col className="col-car"/><col className="col-plate"/><col className="col-status"/><col className="col-price"/></colgroup><thead><tr><th className="check-col"><input type="checkbox" aria-label="Выбрать видимые строки" checked={allVisibleSelected} onChange={(e) => toggleVisible(e.target.checked)} disabled={!eligibleVisible.length}/></th><th>ФИО должника</th><th>ИНН</th><th>Долг</th><th>VIN</th><th>Автомобиль</th><th>Номер</th><th>Статус</th><th>Цена рынка</th></tr></thead>
+    <div className="report-table-scroll" ref={tableRef}><table className="report-table"><colgroup><col className="col-check"/><col className="col-name"/><col className="col-inn"/><col className="col-debt"/><col className="col-vin"/><col className="col-car"/><col className="col-plate"/><col className="col-status"/><col className="col-price"/></colgroup><thead><tr><th className="check-col"><input type="checkbox" aria-label="Выбрать видимые строки" checked={allVisibleSelected} onChange={(e) => toggleVisible(e.target.checked)} disabled={!eligibleVisible.length}/></th><th>ФИО должника</th><th>ИНН</th><th>Долг</th><th>VIN</th><th>Автомобиль</th><th>Номер</th><th>Статус</th><th>Цена рынка</th></tr></thead>
       <tbody>{loading ? Array.from({ length: 7 }, (_, i) => <tr className="skeleton-row" key={i}><td colSpan="9"><span/></td></tr>) : visible.length ? visible.map((car) => {
         const vehicle = [car.make, car.model, car.year].filter(Boolean).join(' ') || '—';
         const offers = car.market_sources || [];
@@ -240,6 +256,7 @@ function ReportPage({ token, reportId, onUpload, notify }) {
       }) : <tr><td colSpan="9" className="empty-cell">{cars.length ? 'Нет данных, удовлетворяющих условиям фильтра' : 'В отчёте пока нет записей'}</td></tr>}</tbody>
     </table></div>
     {modalCar && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModalCar(null)}><section className="offers-modal" role="dialog" aria-modal="true" aria-labelledby="offers-title"><header><div><h2 id="offers-title">Объявления: {[modalCar.make, modalCar.model].filter(Boolean).join(' ') || 'автомобиль'}</h2><p>Средняя цена: {modalCar.price ? `${fmt(modalCar.price)} ₽` : 'нет данных'} · {(modalCar.market_sources || []).length} предложений</p></div><button className="icon-button" onClick={() => setModalCar(null)} aria-label="Закрыть"><Icon name="close"/></button></header><div className="offers-list">{(modalCar.market_sources || []).length ? modalCar.market_sources.map((offer, index) => <article key={`${offer.url}-${index}`}><div><strong>{offer.title || offer.source || `Объявление ${index + 1}`}</strong><small>{offer.source || 'Источник'}</small></div><b>{fmt(offer.price)} ₽</b>{safeUrl(offer.url) && <a href={safeUrl(offer.url)} target="_blank" rel="noopener noreferrer">Открыть</a>}</article>) : <p>Источники пока не вернули объявлений.</p>}</div></section></div>}
+    </>}
   </section>;
 }
 
