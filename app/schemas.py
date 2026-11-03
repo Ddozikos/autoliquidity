@@ -4,4 +4,4 @@ class RenameIn(BaseModel): name:str
 class MarketSearchIn(BaseModel):
  make:str
  model:str
- year:int|None=None
+ year:int
