@@ -8,7 +8,7 @@ def extract_pdf(path: str) -> str:
         return '\n'.join(page.extract_text() or '' for page in pdf.pages)
 
 
-def extract_pdf_with_ocr(path: str) -> tuple[str, float | None]:
+def extract_pdf_with_ocr(path: str) -> tuple[str, float]:
     """Return text and mean Tesseract word confidence when OCR was needed."""
     text = extract_pdf(path)
     if len(text.strip()) >= 50:

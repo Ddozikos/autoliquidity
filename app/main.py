@@ -34,7 +34,7 @@ app.mount('/static',StaticFiles(directory='app/static' if Path('app/static').exi
 logger=logging.getLogger(__name__)
 MAX_UPLOAD_BYTES=25*1024*1024
 FILE_WORKERS=max(1,int(os.getenv('MAX_CONCURRENT_FILES','5')))
-processing_queue:asyncio.Queue=asyncio.Queue()
+processing_queue=None
 _queue_worker_task=None
 def user_from(token,db):
  try: uid=int(token.removeprefix('Bearer ').split(':')[0])
@@ -52,18 +52,22 @@ def health(): return {'ok':True}
 def home():return FileResponse('static/index.html')
 @app.on_event('startup')
 async def start_processing_worker():
- global _queue_worker_task
+ global _queue_worker_task,processing_queue
+ # Test clients and application restarts may use a different event loop.
+ # Create the queue in the active lifespan instead of binding it at import time.
+ processing_queue=asyncio.Queue()
  _queue_worker_task=asyncio.create_task(_processing_worker())
 @app.on_event('shutdown')
 async def stop_processing_worker():
- global _queue_worker_task
+ global _queue_worker_task,processing_queue
+ queue=processing_queue
  if _queue_worker_task:
   _queue_worker_task.cancel()
   try:await _queue_worker_task
   except asyncio.CancelledError:pass
   _queue_worker_task=None
- while not processing_queue.empty():
-  try:rid,files=processing_queue.get_nowait()
+ while queue is not None and not queue.empty():
+  try:rid,files=queue.get_nowait()
   except asyncio.QueueEmpty:break
   for path,_,_ in files:
    try:os.unlink(path)
@@ -73,7 +77,8 @@ async def stop_processing_worker():
    report=db.get(Report,rid)
    if report and report.status=='processing':report.status='failed';report.error_text='Сервер остановлен до обработки пакета';db.commit()
   finally:db.close()
-  processing_queue.task_done()
+  queue.task_done()
+ processing_queue=None
 @app.post('/api/login')
 def login(data:LoginIn):
  db=SessionLocal()
@@ -277,7 +282,7 @@ def export(rid:int,authorization:str=Header(...),ids:str=''):
  try:
   u=user_from(authorization,db);r=db.get(Report,rid)
   if not r or r.user_id!=u.id:raise HTTPException(404,'Отчёт не найден')
-  selected=set(map(int,ids.split(','))) if ids else set(); cars=[c for c in r.cars if c.doc_type=='ban' and c.id in selected and c.status!='В залоге']
+  selected=set(map(int,ids.split(','))) if ids else set(); cars=[c for c in r.cars if c.id in selected and prioritize(c,r.min_price,r.min_demand)]
   from openpyxl import Workbook
   wb=Workbook();ws=wb.active;ws.title='Авто';ws.append(['ФИО','ИНН','Сумма долга','VIN','Автомобиль','Год','Госномер','Цена рынка','Статус','Спрос','Ссылка','Confidence','Тип документа'])
   for c in cars:
